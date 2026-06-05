@@ -1,0 +1,27 @@
+{
+  "name": "amgs-parts-production-management",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true}); try{require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})}catch(e){}\""
+  },
+  "dependencies": {
+    "html5-qrcode": "^2.3.8",
+    "mssql": "^11.0.1",
+    "next": "^15.3.3",
+    "next-auth": "^5.0.0-beta.28",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.7",
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "typescript": "^5.8.3"
+  }
+}
