@@ -3,6 +3,8 @@ export type StockItem = {
   masterPNo: string;
   itemDescription: string;
   totalQty: number;
+  /** When set, inventory updates only at this station name. */
+  finalStation: string | null;
 };
 
 export type ProductionSource = "QR" | "Manual";

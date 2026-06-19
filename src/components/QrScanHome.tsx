@@ -1,11 +1,12 @@
 "use client";
 
 import { Html5Qrcode } from "html5-qrcode";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ManualLookup } from "@/components/ManualLookup";
-import { parsePartFromQr } from "@/lib/parse-qr";
+import { isCustomPartQr, parsePartFromQr } from "@/lib/parse-qr";
 
 const SCAN_TIMEOUT_MS = 10_000;
 const SCANNER_ELEMENT_ID = "qr-reader";
@@ -64,6 +65,13 @@ export function QrScanHome() {
           "That QR is not a part link. Use a code from the part book, or enter the part manually.",
         );
         setScanStatus("Still scanning — center the QR in the box");
+        return;
+      }
+
+      if (isCustomPartQr(partNumber)) {
+        setScanStatus("Custom part code detected. Opening form…");
+        await stopScanner();
+        router.push("/p/custom");
         return;
       }
 
@@ -235,6 +243,9 @@ export function QrScanHome() {
       >
         Scan code
       </button>
+      <Link href="/custom-part" className="secondary-button link-as-button">
+        Add custom part
+      </Link>
     </section>
   );
 }

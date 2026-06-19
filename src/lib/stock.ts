@@ -8,6 +8,7 @@ type StockRow = {
   MasterPNo: string;
   ItemDescription: string;
   TotalQty: number;
+  FinalStation: string | null;
 };
 
 function stockSelectSql(): string {
@@ -16,6 +17,7 @@ function stockSelectSql(): string {
     s.ItemID,
     s.MasterPNo,
     s.ItemDescription,
+    s.FinalStation,
     COALESCE(l.LocOnHandQty, 0) AS TotalQty
   FROM dbo.tblstockitems s
   LEFT JOIN dbo.tblitemlocation l
@@ -24,11 +26,13 @@ function stockSelectSql(): string {
 }
 
 function mapRow(row: StockRow): StockItem {
+  const finalStation = row.FinalStation?.trim() ?? "";
   return {
     itemId: row.ItemID,
     masterPNo: row.MasterPNo?.trim() ?? "",
     itemDescription: row.ItemDescription?.trim() ?? "",
     totalQty: Number(row.TotalQty),
+    finalStation: finalStation || null,
   };
 }
 

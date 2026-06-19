@@ -26,3 +26,8 @@ export function parsePartFromQr(raw: string): string | null {
 
   return null;
 }
+
+/** Scanned code for custom-part production (bare "custom" or /p/custom URL). */
+export function isCustomPartQr(value: string): boolean {
+  return value.trim().toLowerCase() === "custom";
+}

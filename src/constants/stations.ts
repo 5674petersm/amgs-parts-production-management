@@ -5,7 +5,8 @@ export const STATIONS = [
   "Manual Weld",
   "Wire Mesh Production",
   "Mesh To Frame Production",
-  "Powder Coat",
+  "Dragon",
+  "Plasma",
 ] as const;
 
 export type Station = (typeof STATIONS)[number];

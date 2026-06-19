@@ -1,7 +1,9 @@
 import sql from "mssql";
 
+import { shouldUpdateInventory } from "@/lib/final-station";
 import { getOnHandQtyAtHistLoc, HIST_LOC_ID } from "@/lib/item-location";
 import { getPool } from "@/lib/db";
+import { getStockByItemId } from "@/lib/stock";
 import {
   bindDateTime2,
   bindDecimal,
@@ -17,11 +19,25 @@ const PRODUCTION_HIST_TYPE = "Adjustment(+)";
 /** Always recorded on tblitemhistory.HisText1 for production entries. */
 const HIS_TEXT1 = "mpete";
 
+export type RecordProductionResult = {
+  newTotalQty: number;
+  inventoryUpdated: boolean;
+  finalStation: string | null;
+};
+
 export async function recordProduction(
   payload: ProductionSubmitPayload,
   userEmail: string,
-): Promise<{ newTotalQty: number }> {
-  const oldQty = await getOnHandQtyAtHistLoc(payload.itemId);
+): Promise<RecordProductionResult> {
+  const item = await getStockByItemId(payload.itemId);
+  if (!item) {
+    throw new Error("Part not found.");
+  }
+
+  const updateInventory = shouldUpdateInventory(
+    item.finalStation,
+    payload.opStation,
+  );
 
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -29,48 +45,53 @@ export async function recordProduction(
   await transaction.begin();
 
   try {
-    const histDate = plantLocalDateMidnightForSql();
+    let newTotalQty = await getOnHandQtyAtHistLoc(payload.itemId);
 
-    const historyRequest = new sql.Request(transaction);
-    bindInt(historyRequest, "stockId", payload.itemId);
-    bindDateTime2(historyRequest, "histDate", histDate);
-    bindNVarChar(historyRequest, "histType", PRODUCTION_HIST_TYPE, 50);
-    bindDecimal(historyRequest, "histQty", payload.qty);
-    bindNVarChar(historyRequest, "histText", payload.opStation, 255);
-    bindDecimal(historyRequest, "oldQty", oldQty);
-    bindInt(historyRequest, "histLocId", HIST_LOC_ID);
-    bindNVarChar(historyRequest, "hisText1", HIS_TEXT1, 255);
+    if (updateInventory) {
+      const oldQty = newTotalQty;
+      const histDate = plantLocalDateMidnightForSql();
 
-    await historyRequest.query(`
-        INSERT INTO dbo.tblitemhistory (
-          StockID, HistDate, HistType, HistQty, HistText,
-          oldQty, HistLocID, HisText1
-        )
-        VALUES (
-          @stockId, @histDate, @histType, @histQty, @histText,
-          @oldQty, @histLocId, @hisText1
-        )
-      `);
+      const historyRequest = new sql.Request(transaction);
+      bindInt(historyRequest, "stockId", payload.itemId);
+      bindDateTime2(historyRequest, "histDate", histDate);
+      bindNVarChar(historyRequest, "histType", PRODUCTION_HIST_TYPE, 50);
+      bindDecimal(historyRequest, "histQty", payload.qty);
+      bindNVarChar(historyRequest, "histText", payload.opStation, 255);
+      bindDecimal(historyRequest, "oldQty", oldQty);
+      bindInt(historyRequest, "histLocId", HIST_LOC_ID);
+      bindNVarChar(historyRequest, "hisText1", HIS_TEXT1, 255);
 
-    const locationRequest = new sql.Request(transaction);
-    bindInt(locationRequest, "itemId", payload.itemId);
-    bindInt(locationRequest, "locLocationId", HIST_LOC_ID);
-    bindDecimal(locationRequest, "qty", payload.qty);
+      await historyRequest.query(`
+          INSERT INTO dbo.tblitemhistory (
+            StockID, HistDate, HistType, HistQty, HistText,
+            oldQty, HistLocID, HisText1
+          )
+          VALUES (
+            @stockId, @histDate, @histType, @histQty, @histText,
+            @oldQty, @histLocId, @hisText1
+          )
+        `);
 
-    const locationResult = await locationRequest.query<{ LocOnHandQty: number }>(`
-        UPDATE dbo.tblitemlocation
-        SET LocOnHandQty = LocOnHandQty + @qty
-        OUTPUT INSERTED.LocOnHandQty
-        WHERE LocStockID = @itemId AND LocLocationID = @locLocationId
-      `);
+      const locationRequest = new sql.Request(transaction);
+      bindInt(locationRequest, "itemId", payload.itemId);
+      bindInt(locationRequest, "locLocationId", HIST_LOC_ID);
+      bindDecimal(locationRequest, "qty", payload.qty);
 
-    if (locationResult.recordset.length === 0) {
-      throw new Error(
-        "No inventory row to update (tblitemlocation LocStockID / LocLocationID).",
-      );
+      const locationResult = await locationRequest.query<{ LocOnHandQty: number }>(`
+          UPDATE dbo.tblitemlocation
+          SET LocOnHandQty = LocOnHandQty + @qty
+          OUTPUT INSERTED.LocOnHandQty
+          WHERE LocStockID = @itemId AND LocLocationID = @locLocationId
+        `);
+
+      if (locationResult.recordset.length === 0) {
+        throw new Error(
+          "No inventory row to update (tblitemlocation LocStockID / LocLocationID).",
+        );
+      }
+
+      newTotalQty = Number(locationResult.recordset[0].LocOnHandQty);
     }
-
-    const newTotalQty = Number(locationResult.recordset[0].LocOnHandQty);
 
     const timeStamp = plantLocalTimestampForSql();
     const logRequest = new sql.Request(transaction);
@@ -97,7 +118,11 @@ export async function recordProduction(
 
     await transaction.commit();
 
-    return { newTotalQty };
+    return {
+      newTotalQty,
+      inventoryUpdated: updateInventory,
+      finalStation: item.finalStation,
+    };
   } catch (error) {
     await transaction.rollback();
     throw error;

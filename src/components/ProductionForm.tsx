@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 
 import {
   LOCATION_NUMBERS,
   LOCATION_TYPES,
   STATIONS,
 } from "@/constants/stations";
+import { shouldUpdateInventory } from "@/lib/final-station";
 import type { ProductionSource, StockItem } from "@/types";
 
 type ProductionFormProps = {
@@ -23,6 +24,12 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newTotalQty, setNewTotalQty] = useState<number | null>(null);
+  const [inventoryUpdated, setInventoryUpdated] = useState(false);
+
+  const willUpdateInventory = useMemo(
+    () => (opStation ? shouldUpdateInventory(item.finalStation, opStation) : null),
+    [item.finalStation, opStation],
+  );
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -52,6 +59,7 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
         ok?: boolean;
         error?: string;
         newTotalQty?: number;
+        inventoryUpdated?: boolean;
       };
 
       if (!response.ok) {
@@ -61,6 +69,7 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
 
       setSubmitted(true);
       setNewTotalQty(data.newTotalQty ?? null);
+      setInventoryUpdated(data.inventoryUpdated ?? false);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -72,12 +81,23 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
     return (
       <div className="card success-card">
         <h2>Recorded</h2>
-        <p>
-          Added <strong>{qty}</strong> ea to <strong>{item.masterPNo}</strong>.
-        </p>
-        {newTotalQty !== null && (
+        {inventoryUpdated ? (
+          <>
+            <p>
+              Added <strong>{qty}</strong> ea to inventory for{" "}
+              <strong>{item.masterPNo}</strong>.
+            </p>
+            {newTotalQty !== null && (
+              <p>
+                New quantity on hand: <strong>{newTotalQty}</strong> ea
+              </p>
+            )}
+          </>
+        ) : (
           <p>
-            New quantity on hand: <strong>{newTotalQty}</strong> ea
+            Logged <strong>{qty}</strong> ea at <strong>{opStation}</strong> for{" "}
+            <strong>{item.masterPNo}</strong>. Inventory updates at{" "}
+            <strong>{item.finalStation}</strong>.
           </p>
         )}
         <p className="hint">
@@ -104,6 +124,12 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
           <dt>Qty on hand</dt>
           <dd>{item.totalQty} ea</dd>
         </div>
+        {item.finalStation && (
+          <div>
+            <dt>Final station</dt>
+            <dd>{item.finalStation}</dd>
+          </div>
+        )}
       </dl>
 
       <label>
@@ -134,6 +160,13 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
           ))}
         </select>
       </label>
+
+      {willUpdateInventory === false && item.finalStation && (
+        <p className="notice">
+          This station is logged only. Inventory updates at{" "}
+          <strong>{item.finalStation}</strong>.
+        </p>
+      )}
 
       <label>
         Cart or bin

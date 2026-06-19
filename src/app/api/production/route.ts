@@ -85,7 +85,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      inventoryUpdated: result.inventoryUpdated,
       newTotalQty: result.newTotalQty,
+      finalStation: result.finalStation,
     });
   } catch (error) {
     console.error("POST /api/production", error);

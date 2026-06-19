@@ -1,7 +1,9 @@
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { auth, signIn } from "@/auth";
+import { AMGS_LOGO_URL } from "@/constants/branding";
 
 type LoginPageProps = {
   searchParams: Promise<{ callbackUrl?: string }>;
@@ -17,6 +19,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <section className="card login-card">
+      <Image
+        src={AMGS_LOGO_URL}
+        alt="AMGS Advanced Machine Guarding Solutions"
+        width={160}
+        height={160}
+        className="login-logo"
+        priority
+        unoptimized
+      />
       <h2>Sign in</h2>
       <p>Use your company Google Workspace account.</p>
       <form
@@ -31,9 +42,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           Continue with Google
         </button>
       </form>
-      <p className="hint">
-        <Link href="/">Back to home</Link>
-      </p>
     </section>
   );
 }

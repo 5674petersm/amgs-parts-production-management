@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { CustomProductionForm } from "@/components/CustomProductionForm";
 import { ProductionForm } from "@/components/ProductionForm";
+import { isCustomPartQr } from "@/lib/parse-qr";
 import { getStockByMasterPNo } from "@/lib/stock";
 
 type PartPageProps = {
@@ -14,6 +16,17 @@ export default async function PartPage({ params }: PartPageProps) {
 
   if (!masterPNo) {
     redirect("/");
+  }
+
+  if (isCustomPartQr(masterPNo)) {
+    return (
+      <section>
+        <CustomProductionForm source="QR" />
+        <p className="hint" style={{ marginTop: "1rem" }}>
+          <Link href="/">Scan another code</Link>
+        </p>
+      </section>
+    );
   }
 
   let item = null;

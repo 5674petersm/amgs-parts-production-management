@@ -1,12 +1,13 @@
 # AMGS Parts Production Management
 
-Mobile-friendly web app for operators to scan part QR codes, record production quantity, station, and cart/bin location. Part details come from `tblstockitems`; on-hand qty is read/updated in `tblitemlocation` (`LocOnHandQty` at `LocLocationID` = 1). Each submit inserts `tblitemhistory` (`Adjustment(+)`), updates `tblitemlocation`, and inserts `tblproductionlog`.
+Mobile-friendly web app for operators to scan part QR codes, record production quantity, station, and cart/bin location. Part details come from `tblstockitems` (including optional `FinalStation`); on-hand qty is read/updated in `tblitemlocation` (`LocOnHandQty` at `LocLocationID` = 1). Every submit inserts `tblproductionlog`. Inventory (`tblitemhistory` + `tblitemlocation`) updates only when the selected station matches `FinalStation`, or on every submit if `FinalStation` is empty.
 
 **Production URL pattern:** `https://production.advmgs.com/p/{MasterPNo}`
 
 ## Prerequisites
 
 1. Run `sql/create_tblproductionlog.sql` on database `minimrp2025`.
+2. Run `sql/add_finalstation_to_tblstockitems.sql` to add `FinalStation` on `tblstockitems`.
 2. Google Cloud OAuth client (Web application) with redirect URI:
    - `https://production.advmgs.com/api/auth/callback/google`
    - `http://localhost:3000/api/auth/callback/google` (local dev)

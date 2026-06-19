@@ -10,6 +10,7 @@
     "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true}); try{require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})}catch(e){}\""
   },
   "dependencies": {
+    "googleapis": "^173.0.0",
     "html5-qrcode": "^2.3.8",
     "mssql": "^11.0.1",
     "next": "^15.3.3",
