@@ -2,23 +2,51 @@
 
 import { FormEvent, useState } from "react";
 
+import { PartSearchResults } from "@/components/PartSearchResults";
 import { ProductionForm } from "@/components/ProductionForm";
-import type { StockItem } from "@/types";
+import type { PartLookupMatchesResponse, StockItem } from "@/types";
 
 type ManualLookupProps = {
   initialNotFound?: string;
 };
 
+function isNumericItemId(value: string): boolean {
+  return /^\d+$/.test(value.trim()) && Number(value) > 0;
+}
+
+function isLookupMatches(
+  data: StockItem | PartLookupMatchesResponse,
+): data is PartLookupMatchesResponse {
+  return "matches" in data && Array.isArray(data.matches);
+}
+
 export function ManualLookup({ initialNotFound }: ManualLookupProps) {
-  const [masterPNo, setMasterPNo] = useState(initialNotFound ?? "");
-  const [itemId, setItemId] = useState("");
+  const notFound = initialNotFound?.trim() ?? "";
+  const notFoundIsItemId = notFound ? isNumericItemId(notFound) : false;
+
+  const [masterPNo, setMasterPNo] = useState(notFoundIsItemId ? "" : notFound);
+  const [itemId, setItemId] = useState(notFoundIsItemId ? notFound : "");
   const [item, setItem] = useState<StockItem | null>(null);
+  const [matches, setMatches] = useState<StockItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(
-    initialNotFound
-      ? `No part found for "${initialNotFound}". Try item ID or part number below.`
+    notFound
+      ? notFoundIsItemId
+        ? `No part found for item ID ${notFound}. Try again or search by part number below.`
+        : `No part found for "${notFound}". Try item ID or part number below.`
       : null,
   );
+
+  function selectItem(selected: StockItem) {
+    setItem(selected);
+    setMatches(null);
+    setError(null);
+  }
+
+  function clearSearch() {
+    setMatches(null);
+    setError(null);
+  }
 
   async function handleSearch(event: FormEvent) {
     event.preventDefault();
@@ -27,6 +55,7 @@ export function ManualLookup({ initialNotFound }: ManualLookupProps) {
     }
 
     setError(null);
+    setMatches(null);
     setLoading(true);
 
     try {
@@ -39,15 +68,24 @@ export function ManualLookup({ initialNotFound }: ManualLookupProps) {
         }),
       });
 
-      const data = (await response.json()) as StockItem & { error?: string };
+      const data = (await response.json()) as
+        | StockItem
+        | PartLookupMatchesResponse
+        | { error?: string };
 
       if (!response.ok) {
-        setError(data.error ?? "Part not found.");
+        setError((data as { error?: string }).error ?? "Part not found.");
         setItem(null);
         return;
       }
 
-      setItem(data);
+      const result = data as StockItem | PartLookupMatchesResponse;
+      if (isLookupMatches(result)) {
+        setMatches(result.matches);
+        return;
+      }
+
+      selectItem(result);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -63,11 +101,21 @@ export function ManualLookup({ initialNotFound }: ManualLookupProps) {
     );
   }
 
+  if (matches) {
+    return (
+      <PartSearchResults
+        matches={matches}
+        onSelect={selectItem}
+        onBack={clearSearch}
+      />
+    );
+  }
+
   return (
     <form className="card search-form" onSubmit={handleSearch}>
       <p className="notice">
-        Enter either part number (<strong>MasterPNo</strong>) or{" "}
-        <strong>Item ID</strong>.
+        Enter part number (<strong>MasterPNo</strong>) or <strong>Item ID</strong>.
+        Partial part numbers show a list of matches.
       </p>
 
       <label className="field-row">
@@ -76,7 +124,7 @@ export function ManualLookup({ initialNotFound }: ManualLookupProps) {
           type="text"
           value={masterPNo}
           onChange={(e) => setMasterPNo(e.target.value)}
-          placeholder="MasterPNo"
+          placeholder="Full or partial part number"
           autoComplete="off"
         />
       </label>

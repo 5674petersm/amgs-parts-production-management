@@ -2,6 +2,11 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authConfig } from "@/auth.config";
+import {
+  canAccessPath,
+  defaultPathForRole,
+  type Role,
+} from "@/lib/permissions";
 
 const { auth } = NextAuth(authConfig);
 
@@ -22,7 +27,17 @@ export default auth((req) => {
   }
 
   if (isLoggedIn && pathname === "/login") {
-    return NextResponse.redirect(new URL("/", req.nextUrl.origin));
+    const role = (req.auth?.user?.role ?? "operator") as Role;
+    return NextResponse.redirect(new URL(defaultPathForRole(role), req.nextUrl.origin));
+  }
+
+  if (isLoggedIn && !isPublic) {
+    const role = (req.auth?.user?.role ?? "operator") as Role;
+    if (!canAccessPath(pathname, role)) {
+      return NextResponse.redirect(
+        new URL(defaultPathForRole(role), req.nextUrl.origin),
+      );
+    }
   }
 
   return NextResponse.next();

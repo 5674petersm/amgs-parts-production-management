@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "@/auth";
-import { getStockByItemId, getStockByMasterPNo } from "@/lib/stock";
+import { requireAnyPermission } from "@/lib/api-auth";
+import {
+  getStockByItemId,
+  getStockByMasterPNo,
+  searchStockItems,
+} from "@/lib/stock";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authResult = await requireAnyPermission(["production", "editParts"]);
+  if ("response" in authResult) {
+    return authResult.response;
   }
 
   let body: { itemId?: number | string; masterPNo?: string };
@@ -31,18 +35,33 @@ export async function POST(request: Request) {
   }
 
   try {
-    const item =
-      itemId !== undefined && (!masterPNo || masterPNo.length === 0)
-        ? await getStockByItemId(itemId)
-        : masterPNo
-          ? await getStockByMasterPNo(masterPNo)
-          : null;
-
-    if (!item) {
-      return NextResponse.json({ error: "Part not found." }, { status: 404 });
+    if (itemId !== undefined && (!masterPNo || masterPNo.length === 0)) {
+      const item = await getStockByItemId(itemId);
+      if (!item) {
+        return NextResponse.json({ error: "Part not found." }, { status: 404 });
+      }
+      return NextResponse.json(item);
     }
 
-    return NextResponse.json(item);
+    if (masterPNo) {
+      const exact = await getStockByMasterPNo(masterPNo);
+      if (exact) {
+        return NextResponse.json(exact);
+      }
+
+      const matches = await searchStockItems(masterPNo);
+      if (matches.length === 0) {
+        return NextResponse.json({ error: "Part not found." }, { status: 404 });
+      }
+
+      if (matches.length === 1) {
+        return NextResponse.json(matches[0]);
+      }
+
+      return NextResponse.json({ matches });
+    }
+
+    return NextResponse.json({ error: "Part not found." }, { status: 404 });
   } catch (error) {
     console.error("POST /api/parts/lookup", error);
     return NextResponse.json(

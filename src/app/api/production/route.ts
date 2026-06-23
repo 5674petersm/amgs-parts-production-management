@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "@/auth";
+import { requirePermission } from "@/lib/api-auth";
 import { STATIONS, LOCATION_TYPES } from "@/constants/stations";
 import { recordProduction } from "@/lib/production";
 import type { ProductionSource } from "@/types";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  const userEmail = session?.user?.email;
-  if (!userEmail) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authResult = await requirePermission("production");
+  if ("response" in authResult) {
+    return authResult.response;
   }
+  const userEmail = authResult.email;
 
   let body: {
     itemId?: number;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "@/auth";
+import { requirePermission } from "@/lib/api-auth";
 import { isCustomPartMaterial } from "@/constants/custom-part-materials";
 import {
   CUSTOM_PART_MAX_FILE_BYTES,
@@ -17,11 +17,11 @@ import { uploadCustomPartToDrive } from "@/lib/google-drive";
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-  const session = await auth();
-  const userEmail = session?.user?.email;
-  if (!userEmail) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authResult = await requirePermission("customParts");
+  if ("response" in authResult) {
+    return authResult.response;
   }
+  const userEmail = authResult.email;
 
   let formData: FormData;
   try {

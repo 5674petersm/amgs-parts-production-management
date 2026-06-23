@@ -1,24 +1,31 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { auth } from "@/auth";
 import { CustomProductionForm } from "@/components/CustomProductionForm";
 import { ProductionForm } from "@/components/ProductionForm";
-import { isCustomPartQr } from "@/lib/parse-qr";
-import { getStockByMasterPNo } from "@/lib/stock";
-
+import { hasPermission } from "@/lib/permissions";
+import { isCustomPartQr, parseItemIdFromQrKey } from "@/lib/parse-qr";
+import { getStockByItemId } from "@/lib/stock";
 type PartPageProps = {
   params: Promise<{ partNumber: string }>;
 };
 
 export default async function PartPage({ params }: PartPageProps) {
-  const { partNumber } = await params;
-  const masterPNo = decodeURIComponent(partNumber).trim();
+  const session = await auth();
+  const role = session?.user?.role ?? "operator";
 
-  if (!masterPNo) {
+  if (!hasPermission(role, "production")) {
     redirect("/");
   }
 
-  if (isCustomPartQr(masterPNo)) {
+  const { partNumber } = await params;  const qrKey = decodeURIComponent(partNumber).trim();
+
+  if (!qrKey) {
+    redirect("/");
+  }
+
+  if (isCustomPartQr(qrKey)) {
     return (
       <section>
         <CustomProductionForm source="QR" />
@@ -29,9 +36,15 @@ export default async function PartPage({ params }: PartPageProps) {
     );
   }
 
+  const itemId = parseItemIdFromQrKey(qrKey);
+  if (itemId === null) {
+    const query = new URLSearchParams({ notFound: qrKey });
+    redirect(`/search?${query.toString()}`);
+  }
+
   let item = null;
   try {
-    item = await getStockByMasterPNo(masterPNo);
+    item = await getStockByItemId(itemId);
   } catch (error) {
     console.error("PartPage load error", error);
     return (
@@ -46,7 +59,7 @@ export default async function PartPage({ params }: PartPageProps) {
 
   if (!item) {
     const query = new URLSearchParams({
-      notFound: masterPNo,
+      notFound: String(itemId),
     });
     redirect(`/search?${query.toString()}`);
   }

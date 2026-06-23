@@ -1,6 +1,8 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 
+import { roleForEmail, type Role } from "@/lib/permissions";
+
 const allowedDomain = process.env.AUTH_ALLOWED_DOMAIN?.toLowerCase().trim();
 
 export const authConfig = {
@@ -48,14 +50,22 @@ export const authConfig = {
       return email.endsWith(`@${allowedDomain}`);
     },
     async session({ session, token }) {
-      if (session.user && token.email) {
-        session.user.email = token.email;
+      if (session.user) {
+        if (token.email) {
+          session.user.email = token.email;
+        }
+        if (token.role) {
+          session.user.role = token.role as Role;
+        }
       }
       return session;
     },
     async jwt({ token, user }) {
       if (user?.email) {
         token.email = user.email;
+      }
+      if (token.email) {
+        token.role = roleForEmail(token.email);
       }
       return token;
     },

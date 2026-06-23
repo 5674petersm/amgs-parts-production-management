@@ -18,3 +18,7 @@ export type ProductionSubmitPayload = {
   locationNo: number;
   source: ProductionSource;
 };
+
+export type PartLookupMatchesResponse = {
+  matches: StockItem[];
+};

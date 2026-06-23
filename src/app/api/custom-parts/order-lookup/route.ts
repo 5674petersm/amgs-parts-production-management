@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "@/auth";
+import { requirePermission } from "@/lib/api-auth";
 import { lookupCustomPartOrder } from "@/lib/custom-parts";
 
 export async function GET(request: Request) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authResult = await requirePermission("customParts");
+  if ("response" in authResult) {
+    return authResult.response;
   }
 
   const { searchParams } = new URL(request.url);

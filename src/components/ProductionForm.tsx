@@ -25,6 +25,39 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [newTotalQty, setNewTotalQty] = useState<number | null>(null);
   const [inventoryUpdated, setInventoryUpdated] = useState(false);
+  const [notifySending, setNotifySending] = useState(false);
+  const [notifySent, setNotifySent] = useState(false);
+  const [notifyError, setNotifyError] = useState<string | null>(null);
+
+  const missingFinalStation = !item.finalStation?.trim();
+
+  async function handleNotifyEngineering() {
+    if (notifySending || notifySent || !missingFinalStation) {
+      return;
+    }
+
+    setNotifyError(null);
+    setNotifySending(true);
+
+    try {
+      const response = await fetch(
+        `/api/parts/${item.itemId}/notify-engineering`,
+        { method: "POST" },
+      );
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+
+      if (!response.ok) {
+        setNotifyError(data.error ?? "Unable to send notification.");
+        return;
+      }
+
+      setNotifySent(true);
+    } catch {
+      setNotifyError("Network error. Please try again.");
+    } finally {
+      setNotifySending(false);
+    }
+  }
 
   const willUpdateInventory = useMemo(
     () => (opStation ? shouldUpdateInventory(item.finalStation, opStation) : null),
@@ -110,7 +143,37 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
   }
 
   return (
-    <form className="card form-card" onSubmit={handleSubmit}>
+    <>
+      {missingFinalStation && (
+        <div className="card warning-card">
+          <p className="warning-title">No Final Station Assigned</p>
+          <p className="warning-text">
+            Production can still be recorded, but inventory may update at every
+            station until engineering sets a final station.
+          </p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void handleNotifyEngineering()}
+            disabled={notifySending || notifySent}
+          >
+            {notifySending
+              ? "Sending…"
+              : notifySent
+                ? "Engineering notified"
+                : "Send to Engineering"}
+          </button>
+          {notifyError && <p className="error">{notifyError}</p>}
+          {notifySent && !notifyError && (
+            <p className="hint field-hint">
+              Engineering was emailed a link to set the final station for this
+              part.
+            </p>
+          )}
+        </div>
+      )}
+
+      <form className="card form-card" onSubmit={handleSubmit}>
       <dl className="part-details">
         <div>
           <dt>Part number</dt>
@@ -209,5 +272,6 @@ export function ProductionForm({ item, source }: ProductionFormProps) {
         {submitting ? "Submitting…" : "Submit"}
       </button>
     </form>
+    </>
   );
 }

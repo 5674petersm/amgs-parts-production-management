@@ -2,8 +2,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { AMGS_LOGO_URL } from "@/constants/branding";
+import { hasPermission } from "@/lib/permissions";
+
 export async function Header() {
   const session = await auth();
+  const role = session?.user?.role ?? "operator";
 
   return (
     <header className="site-header">
@@ -21,6 +24,17 @@ export async function Header() {
       </Link>
       {session?.user?.email && (
         <div className="user-block">
+          <nav className="header-nav" aria-label="Main">
+            {hasPermission(role, "production") && (
+              <Link href="/">Scan</Link>
+            )}
+            {hasPermission(role, "customParts") && (
+              <Link href="/custom-part">Custom parts</Link>
+            )}
+            {hasPermission(role, "editParts") && (
+              <Link href="/parts/edit">Edit parts</Link>
+            )}
+          </nav>
           <span className="user-email">{session.user.email}</span>
           <form
             action={async () => {

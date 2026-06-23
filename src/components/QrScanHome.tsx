@@ -6,14 +6,22 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ManualLookup } from "@/components/ManualLookup";
-import { isCustomPartQr, parsePartFromQr } from "@/lib/parse-qr";
+import {
+  isCustomPartQr,
+  parseItemIdFromQr,
+  parsePartFromQr,
+} from "@/lib/parse-qr";
 
 const SCAN_TIMEOUT_MS = 10_000;
 const SCANNER_ELEMENT_ID = "qr-reader";
 
 type ScanPhase = "idle" | "scanning" | "manual";
 
-export function QrScanHome() {
+type QrScanHomeProps = {
+  canCreateCustomParts?: boolean;
+};
+
+export function QrScanHome({ canCreateCustomParts = false }: QrScanHomeProps) {
   const router = useRouter();
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [secondsLeft, setSecondsLeft] = useState(10);
@@ -58,8 +66,8 @@ export function QrScanHome() {
       setScanError(null);
       setScanStatus(`QR detected: ${preview}`);
 
-      const partNumber = parsePartFromQr(text);
-      if (!partNumber) {
+      const qrKey = parsePartFromQr(text);
+      if (!qrKey) {
         processingRef.current = false;
         setScanError(
           "That QR is not a part link. Use a code from the part book, or enter the part manually.",
@@ -68,36 +76,48 @@ export function QrScanHome() {
         return;
       }
 
-      if (isCustomPartQr(partNumber)) {
+      if (isCustomPartQr(qrKey)) {
         setScanStatus("Custom part code detected. Opening form…");
         await stopScanner();
         router.push("/p/custom");
         return;
       }
 
-      setScanStatus(`Looking up part ${partNumber} in database…`);
+      const itemId = parseItemIdFromQr(text);
+      if (itemId === null) {
+        processingRef.current = false;
+        setScanError(
+          "That QR is not a valid item ID. Use an item-ID code from the part book, or enter the part manually.",
+        );
+        setScanStatus("Still scanning — center the QR in the box");
+        return;
+      }
+
+      setScanStatus(`Looking up item ${itemId} in database…`);
       handledRef.current = true;
 
       try {
-        const response = await fetch(
-          `/api/parts/${encodeURIComponent(partNumber)}`,
-        );
-        const data = (await response.json()) as { error?: string };
+        const response = await fetch(`/api/parts/${itemId}`);
+        const data = (await response.json()) as {
+          error?: string;
+          masterPNo?: string;
+        };
 
         if (!response.ok) {
           handledRef.current = false;
           processingRef.current = false;
           setScanError(
             data.error ??
-              `Part "${partNumber}" was not found. Check the code or enter it manually.`,
+              `Item ID ${itemId} was not found. Check the code or enter the part manually.`,
           );
           setScanStatus("Scan again or use manual entry below");
           return;
         }
 
-        setScanStatus(`Found ${partNumber}. Opening form…`);
+        const label = data.masterPNo?.trim() || String(itemId);
+        setScanStatus(`Found ${label}. Opening form…`);
         await stopScanner();
-        router.push(`/p/${encodeURIComponent(partNumber)}`);
+        router.push(`/p/${itemId}`);
       } catch {
         handledRef.current = false;
         processingRef.current = false;
@@ -243,9 +263,11 @@ export function QrScanHome() {
       >
         Scan code
       </button>
-      <Link href="/custom-part" className="secondary-button link-as-button">
-        Add custom part
-      </Link>
+      {canCreateCustomParts && (
+        <Link href="/custom-part" className="secondary-button link-as-button">
+          Add custom part
+        </Link>
+      )}
     </section>
   );
 }

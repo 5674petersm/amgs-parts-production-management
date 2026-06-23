@@ -35,6 +35,27 @@ Open [http://localhost:3000](http://localhost:3000).
 | `AUTH_URL` | Public app URL |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google OAuth |
 | `AUTH_ALLOWED_DOMAIN` | Workspace domain (e.g. `advmgs.com`) |
+| `AUTH_ADMIN_EMAILS` | Comma-separated admin emails (full access) |
+| `AUTH_ENGINEER_EMAILS` | Comma-separated engineer emails (custom parts + edit stock parts; also receives final-station alerts) |
+| `GMAIL_SEND_AS` | Google Workspace user the service account sends email as (requires domain-wide delegation for Gmail) |
+
+
+Users not listed in either role variable are **Operators** (scan QR codes and record production).
+
+### Email alerts (missing final station)
+
+When an operator scans a part with no final station, they can tap **Send to Engineering**. Email goes to everyone in `AUTH_ENGINEER_EMAILS` with a link to edit that part.
+
+1. In Google Admin → Security → API controls → Domain-wide delegation, authorize your service account with scope `https://www.googleapis.com/auth/gmail.send`.
+2. Set `GMAIL_SEND_AS` to a Workspace mailbox the service account may impersonate (e.g. `production@advmgs.com`).
+
+## Roles
+
+| Role | Access |
+|------|--------|
+| **Operator** | Scan QR codes, manual lookup, record production (stock + custom) |
+| **Engineer** | Create custom parts, edit stock part description and final station |
+| **Admin** | All of the above |
 
 ## `tblproductionlog` columns
 
