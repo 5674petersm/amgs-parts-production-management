@@ -1,3 +1,5 @@
+import type { ProductionSource } from "@/types";
+
 export type CustomPartListItem = {
   customPartId: number;
   amgsOrderNumber: string;
@@ -6,6 +8,18 @@ export type CustomPartListItem = {
   description: string;
   qtyNeeded: number;
   material: string;
+  completedAt: string | null;
+};
+
+export type CustomProductionSubmitPayload = {
+  customPartId: number;
+  partNumber: string;
+  qty: number;
+  opStation: string;
+  partComplete: boolean;
+  locationType: "Cart" | "Bin";
+  locationNo: number;
+  source: ProductionSource;
 };
 
 export type CustomPartDraft = {

@@ -20,6 +20,8 @@ CREATE TABLE dbo.tblcustomparts (
     GoogleDriveFolderUrl     NVARCHAR(500) NULL,
     SubmittedBy           NVARCHAR(256) NOT NULL,
     SubmittedAt           DATETIME2(0) NOT NULL,
+    CompletedAt           DATETIME2(0) NULL,
+    CompletedBy           NVARCHAR(256) NULL,
 
     CONSTRAINT PK_tblcustomparts PRIMARY KEY CLUSTERED (CustomPartID),
     CONSTRAINT UQ_tblcustomparts_PartNumber UNIQUE (PartNumber),

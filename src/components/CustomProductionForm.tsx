@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   LOCATION_NUMBERS,
   LOCATION_TYPES,
+  STATIONS,
 } from "@/constants/stations";
 import type { CustomPartListItem } from "@/types/custom-part";
 import type { ProductionSource } from "@/types";
@@ -14,14 +15,24 @@ type CustomProductionFormProps = {
 };
 
 type CapturedCustomProduction = {
+  customPartId: number;
   orderNumber: string;
   customerName: string;
   partNumber: string;
   description: string;
+  qtyNeeded: number;
   qty: number;
-  partsComplete: boolean;
+  opStation: string;
+  partComplete: boolean;
   locationType: "Cart" | "Bin";
   locationNo: number;
+};
+
+type SubmitResult = {
+  totalProduced: number;
+  qtyNeeded: number;
+  partComplete: boolean;
+  lineMarkedComplete: boolean;
 };
 
 export function CustomProductionForm({ source }: CustomProductionFormProps) {
@@ -34,11 +45,15 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
   const [orderNumber, setOrderNumber] = useState("");
   const [partNumber, setPartNumber] = useState("");
   const [qty, setQty] = useState("");
-  const [partsComplete, setPartsComplete] = useState(false);
+  const [opStation, setOpStation] = useState("");
+  const [partComplete, setPartComplete] = useState(false);
   const [locationType, setLocationType] = useState<"" | "Cart" | "Bin">("");
   const [locationNo, setLocationNo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [captured, setCaptured] = useState<CapturedCustomProduction | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
 
   const selectedPart = useMemo(
     () => parts.find((part) => part.partNumber === partNumber) ?? null,
@@ -169,6 +184,11 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
       return;
     }
 
+    if (!opStation) {
+      setError("Select a station.");
+      return;
+    }
+
     if (!locationType) {
       setError("Select cart or bin.");
       return;
@@ -184,66 +204,108 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
     }
 
     setCaptured({
+      customPartId: selectedPart.customPartId,
       orderNumber,
       customerName: selectedPart.customerName,
       partNumber: selectedPart.partNumber,
       description: selectedPart.description,
+      qtyNeeded: selectedPart.qtyNeeded,
       qty: qtyValue,
-      partsComplete,
+      opStation,
+      partComplete,
       locationType,
       locationNo: locationNoValue,
     });
   }
 
+  async function handleConfirmSubmit() {
+    if (!captured || submitting || submitted) {
+      return;
+    }
+
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      const response = await fetch("/api/custom-parts/production", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customPartId: captured.customPartId,
+          partNumber: captured.partNumber,
+          qty: captured.qty,
+          opStation: captured.opStation,
+          partComplete: captured.partComplete,
+          locationType: captured.locationType,
+          locationNo: captured.locationNo,
+          source,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        totalProduced?: number;
+        qtyNeeded?: number;
+        partComplete?: boolean;
+        lineMarkedComplete?: boolean;
+      };
+
+      if (!response.ok) {
+        setError(data.error ?? "Submit failed.");
+        return;
+      }
+
+      setSubmitted(true);
+      setSubmitResult({
+        totalProduced: data.totalProduced ?? captured.qty,
+        qtyNeeded: data.qtyNeeded ?? captured.qtyNeeded,
+        partComplete: data.partComplete ?? false,
+        lineMarkedComplete: data.lineMarkedComplete ?? false,
+      });
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleBackToEdit() {
+    setCaptured(null);
+    setError(null);
+  }
+
   function handleRecordAnother() {
     setCaptured(null);
+    setSubmitted(false);
+    setSubmitResult(null);
     setQty("");
-    setPartsComplete(false);
+    setOpStation("");
+    setPartComplete(false);
     setLocationType("");
     setLocationNo("");
     setError(null);
   }
 
-  if (captured) {
+  if (submitted && captured && submitResult) {
     return (
       <div className="card success-card">
-        <h2>Captured (not saved yet)</h2>
+        <h2>Recorded</h2>
         <p>
-          This entry was reviewed on screen only. Database recording for custom
-          parts is not enabled yet.
+          Logged <strong>{captured.qty}</strong> ea at{" "}
+          <strong>{captured.opStation}</strong> for{" "}
+          <strong>{captured.partNumber}</strong>.
         </p>
-        <dl className="part-details">
-          <div>
-            <dt>AMGS order number</dt>
-            <dd>{captured.orderNumber}</dd>
-          </div>
-          <div>
-            <dt>Customer</dt>
-            <dd>{captured.customerName}</dd>
-          </div>
-          <div>
-            <dt>Part number</dt>
-            <dd>{captured.partNumber}</dd>
-          </div>
-          <div>
-            <dt>Description</dt>
-            <dd>{captured.description}</dd>
-          </div>
-          <div>
-            <dt>Quantity</dt>
-            <dd>{captured.qty}</dd>
-          </div>
-          <div>
-            <dt>Parts complete</dt>
-            <dd>{captured.partsComplete ? "Yes" : "No"}</dd>
-          </div>
-          <div>
-            <dt>Location</dt>
-            <dd>
-              {captured.locationType} {captured.locationNo}
-            </dd>
-          </div>
-        </dl>
+        <p>
+          Total produced: <strong>{submitResult.totalProduced}</strong> of{" "}
+          <strong>{submitResult.qtyNeeded}</strong> needed
+        </p>
+        {submitResult.lineMarkedComplete && (
+          <p>Part line marked complete.</p>
+        )}
+        {submitResult.partComplete && !submitResult.lineMarkedComplete && (
+          <p className="hint">This part line was already marked complete.</p>
+        )}
         <p className="hint">
           {source === "QR"
             ? "Scan the custom QR code again for the next entry."
@@ -257,6 +319,74 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
           Record another
         </button>
       </div>
+    );
+  }
+
+  if (captured) {
+    return (
+      <section>
+        <div className="card">
+          <h2>Review entry</h2>
+          <p>Confirm details, then submit to the production log.</p>
+          <dl className="part-details">
+            <div>
+              <dt>AMGS order number</dt>
+              <dd>{captured.orderNumber}</dd>
+            </div>
+            <div>
+              <dt>Customer</dt>
+              <dd>{captured.customerName}</dd>
+            </div>
+            <div>
+              <dt>Part number</dt>
+              <dd>{captured.partNumber}</dd>
+            </div>
+            <div>
+              <dt>Description</dt>
+              <dd>{captured.description}</dd>
+            </div>
+            <div>
+              <dt>Quantity</dt>
+              <dd>{captured.qty}</dd>
+            </div>
+            <div>
+              <dt>Station</dt>
+              <dd>{captured.opStation}</dd>
+            </div>
+            <div>
+              <dt>Part complete</dt>
+              <dd>{captured.partComplete ? "Yes" : "No"}</dd>
+            </div>
+            <div>
+              <dt>Location</dt>
+              <dd>
+                {captured.locationType} {captured.locationNo}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        {error && <p className="error">{error}</p>}
+
+        <div className="action-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handleConfirmSubmit()}
+            disabled={submitting}
+          >
+            {submitting ? "Submitting…" : "Submit"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={handleBackToEdit}
+            disabled={submitting}
+          >
+            Edit
+          </button>
+        </div>
+      </section>
     );
   }
 
@@ -306,6 +436,7 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
             <option key={part.partNumber} value={part.partNumber}>
               {part.partNumber}
               {part.description ? ` — ${part.description}` : ""}
+              {part.completedAt ? " (complete)" : ""}
             </option>
           ))}
         </select>
@@ -329,6 +460,12 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
             <dt>Material</dt>
             <dd>{selectedPart.material}</dd>
           </div>
+          {selectedPart.completedAt && (
+            <div>
+              <dt>Status</dt>
+              <dd>Part line complete</dd>
+            </div>
+          )}
         </dl>
       )}
 
@@ -345,14 +482,34 @@ export function CustomProductionForm({ source }: CustomProductionFormProps) {
         />
       </label>
 
+      <label>
+        Station
+        <select
+          required
+          value={opStation}
+          onChange={(e) => setOpStation(e.target.value)}
+        >
+          <option value="">Select station…</option>
+          {STATIONS.map((station) => (
+            <option key={station} value={station}>
+              {station}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <label className="checkbox-label">
         <input
           type="checkbox"
-          checked={partsComplete}
-          onChange={(e) => setPartsComplete(e.target.checked)}
+          checked={partComplete}
+          onChange={(e) => setPartComplete(e.target.checked)}
         />
-        Parts complete
+        Part complete
       </label>
+      <p className="hint field-hint">
+        Check when the entire part order line is finished. You can still record
+        production after marking complete.
+      </p>
 
       <label>
         Cart or bin

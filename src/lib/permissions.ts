@@ -18,8 +18,8 @@ function parseEmailList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-export function getEngineeringEmails(): string[] {
-  return parseEmailList(process.env.AUTH_ENGINEER_EMAILS);
+export function getEngineeringNotifyEmails(): string[] {
+  return parseEmailList(process.env.ENGINEERING_NOTIFY_EMAILS);
 }
 
 export function roleForEmail(email: string): Role {

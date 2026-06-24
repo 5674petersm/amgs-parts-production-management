@@ -78,6 +78,7 @@ export async function listCustomPartsByOrder(
     Description: string;
     QtyNeeded: number;
     Material: string;
+    CompletedAt: Date | null;
   }>(`
     SELECT
       CustomPartID,
@@ -86,7 +87,8 @@ export async function listCustomPartsByOrder(
       PartNumber,
       Description,
       QtyNeeded,
-      Material
+      Material,
+      CompletedAt
     FROM dbo.tblcustomparts
     WHERE AMGSOrderNumber = @orderNumber
     ORDER BY PartSequence ASC
@@ -100,6 +102,7 @@ export async function listCustomPartsByOrder(
     description: row.Description.trim(),
     qtyNeeded: Number(row.QtyNeeded),
     material: row.Material.trim(),
+    completedAt: row.CompletedAt ? row.CompletedAt.toISOString() : null,
   }));
 }
 
