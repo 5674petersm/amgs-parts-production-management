@@ -94,6 +94,39 @@ Encode the full URL in each QR code, for example:
 
 Use URL encoding if the part number contains special characters.
 
-## Deploy
+## Deploy with PM2
 
-Build with `npm run build` and run `npm start`, or deploy to Cloud Run, Vercel, or any Node host. Set all environment variables in the hosting platform. Point `production.advmgs.com` to the deployment.
+This server runs the app from `/srv/amgs/production` with PM2. The app reads environment values from `.env`, so keep that file on the server and out of git.
+
+First-time setup:
+
+```bash
+cd /srv/amgs/production
+npm install
+npm run build
+npm run pm2:start
+pm2 save
+pm2 startup
+```
+
+Run the command printed by `pm2 startup` with sudo so PM2 restarts after server reboots.
+
+Deploy updates:
+
+```bash
+cd /srv/amgs/production
+npm install
+npm run pm2:restart
+pm2 save
+```
+
+Useful PM2 commands:
+
+```bash
+pm2 status
+npm run pm2:logs
+pm2 restart amgs-production --update-env
+pm2 stop amgs-production
+```
+
+The PM2 app is defined in `ecosystem.config.cjs` and listens on port `3100` by default. Caddy proxies `https://production.advmgs.com` to `http://127.0.0.1:3100`.
