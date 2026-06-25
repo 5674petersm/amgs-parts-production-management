@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { requirePermission } from "@/lib/api-auth";
 import { listCustomPartsByOrder } from "@/lib/custom-parts";
 
 export async function GET(request: Request) {
-  const authResult = await requirePermission("production");
-  if ("response" in authResult) {
-    return authResult.response;
-  }
-
   const { searchParams } = new URL(request.url);
   const order = searchParams.get("order")?.trim() ?? "";
 

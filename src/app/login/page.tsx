@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { auth, signIn } from "@/auth";
 import { AMGS_LOGO_URL } from "@/constants/branding";
+import { defaultPathForRole } from "@/lib/permissions";
 
 type LoginPageProps = {
   searchParams: Promise<{ callbackUrl?: string }>;
@@ -11,8 +12,8 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const session = await auth();
-  if (session?.user) {
-    redirect("/");
+  if (session?.user?.role) {
+    redirect(defaultPathForRole(session.user.role));
   }
 
   const { callbackUrl } = await searchParams;

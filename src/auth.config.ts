@@ -1,7 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 
-import { roleForEmail, type Role } from "@/lib/permissions";
+import { isPublicPath, roleForEmail, type Role } from "@/lib/permissions";
 
 const allowedDomain = process.env.AUTH_ALLOWED_DOMAIN?.toLowerCase().trim();
 
@@ -24,10 +24,7 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl;
-      const isPublic =
-        pathname.startsWith("/login") || pathname.startsWith("/api/auth");
-
-      if (isPublic) {
+      if (isPublicPath(pathname, request.method)) {
         return true;
       }
 

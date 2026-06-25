@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { auth } from "@/auth";
 import { CustomProductionForm } from "@/components/CustomProductionForm";
 import { ProductionForm } from "@/components/ProductionForm";
-import { hasPermission } from "@/lib/permissions";
 import { isCustomPartQr, parseItemIdFromQrKey } from "@/lib/parse-qr";
 import { getStockByItemId } from "@/lib/stock";
 type PartPageProps = {
@@ -12,13 +10,6 @@ type PartPageProps = {
 };
 
 export default async function PartPage({ params }: PartPageProps) {
-  const session = await auth();
-  const role = session?.user?.role ?? "operator";
-
-  if (!hasPermission(role, "production")) {
-    redirect("/");
-  }
-
   const { partNumber } = await params;  const qrKey = decodeURIComponent(partNumber).trim();
 
   if (!qrKey) {

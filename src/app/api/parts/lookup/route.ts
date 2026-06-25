@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { requireAnyPermission } from "@/lib/api-auth";
 import {
   getStockByItemId,
   getStockByMasterPNo,
@@ -8,11 +7,6 @@ import {
 } from "@/lib/stock";
 
 export async function POST(request: Request) {
-  const authResult = await requireAnyPermission(["production", "editParts"]);
-  if ("response" in authResult) {
-    return authResult.response;
-  }
-
   let body: { itemId?: number | string; masterPNo?: string };
   try {
     body = await request.json();

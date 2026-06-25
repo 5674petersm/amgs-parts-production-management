@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import {
   hasAnyPermission,
   hasPermission,
+  PRODUCTION_ANONYMOUS_USER,
   type Permission,
   type Role,
 } from "@/lib/permissions";
@@ -16,6 +17,13 @@ type AuthSuccess = {
 type AuthFailure = {
   response: NextResponse;
 };
+
+export async function optionalAuthEmail(
+  fallback = PRODUCTION_ANONYMOUS_USER,
+): Promise<string> {
+  const session = await auth();
+  return session?.user?.email ?? fallback;
+}
 
 export async function requireAuth(): Promise<AuthSuccess | AuthFailure> {
   const session = await auth();

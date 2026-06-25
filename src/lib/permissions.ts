@@ -2,6 +2,25 @@ export type Role = "admin" | "engineer" | "operator";
 
 export type Permission = "production" | "customParts" | "editParts";
 
+/** Recorded on production log entries when no one is signed in. */
+export const PRODUCTION_ANONYMOUS_USER = "floor";
+
+/** Short label for tblitemhistory.HisText1 on production entries. */
+export function productionHisText1Label(userEmail: string): string {
+  if (!userEmail || userEmail === PRODUCTION_ANONYMOUS_USER) {
+    return PRODUCTION_ANONYMOUS_USER;
+  }
+
+  const atIndex = userEmail.indexOf("@");
+  const localPart = atIndex === -1 ? userEmail : userEmail.slice(0, atIndex);
+
+  if (localPart.length <= 5) {
+    return localPart;
+  }
+
+  return localPart.slice(0, 5);
+}
+
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: ["production", "customParts", "editParts"],
   engineer: ["customParts", "editParts"],
@@ -48,9 +67,6 @@ export function hasAnyPermission(
 }
 
 export function defaultPathForRole(role: Role): string {
-  if (hasPermission(role, "production")) {
-    return "/";
-  }
   if (hasPermission(role, "customParts")) {
     return "/custom-part";
   }
@@ -60,13 +76,47 @@ export function defaultPathForRole(role: Role): string {
   return "/";
 }
 
-export function canAccessPath(pathname: string, role: Role): boolean {
+/** Pages and APIs that floor staff can use without signing in. */
+export function isPublicPath(pathname: string, method = "GET"): boolean {
   if (pathname.startsWith("/login") || pathname.startsWith("/api/auth")) {
     return true;
   }
 
   if (pathname === "/" || pathname.startsWith("/search") || pathname.startsWith("/p/")) {
-    return hasPermission(role, "production");
+    return true;
+  }
+
+  if (pathname === "/api/production") {
+    return true;
+  }
+
+  if (pathname === "/api/parts/lookup") {
+    return true;
+  }
+
+  if (pathname === "/api/custom-parts/orders" || pathname === "/api/custom-parts/parts") {
+    return true;
+  }
+
+  if (pathname === "/api/custom-parts/production") {
+    return true;
+  }
+
+  if (pathname.endsWith("/notify-engineering")) {
+    return method === "POST";
+  }
+
+  const partApiMatch = pathname.match(/^\/api\/parts\/[^/]+$/);
+  if (partApiMatch) {
+    return method !== "PATCH";
+  }
+
+  return false;
+}
+
+export function canAccessPath(pathname: string, role: Role): boolean {
+  if (isPublicPath(pathname)) {
+    return true;
   }
 
   if (pathname.startsWith("/custom-part")) {
@@ -74,6 +124,15 @@ export function canAccessPath(pathname: string, role: Role): boolean {
   }
 
   if (pathname.startsWith("/parts/edit")) {
+    return hasPermission(role, "editParts");
+  }
+
+  if (pathname.startsWith("/api/custom-parts")) {
+    return hasPermission(role, "customParts");
+  }
+
+  const partApiMatch = pathname.match(/^\/api\/parts\/[^/]+$/);
+  if (partApiMatch && pathname !== "/api/parts/lookup") {
     return hasPermission(role, "editParts");
   }
 

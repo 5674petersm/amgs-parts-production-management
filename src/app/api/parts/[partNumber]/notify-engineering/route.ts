@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requirePermission } from "@/lib/api-auth";
+import { optionalAuthEmail } from "@/lib/api-auth";
 import { notifyEngineeringMissingFinalStation } from "@/lib/engineering-notify";
 import { parseItemIdFromQrKey } from "@/lib/parse-qr";
 import { getStockByItemId } from "@/lib/stock";
@@ -10,10 +10,7 @@ type RouteContext = {
 };
 
 export async function POST(_request: Request, context: RouteContext) {
-  const authResult = await requirePermission("production");
-  if ("response" in authResult) {
-    return authResult.response;
-  }
+  const reportedBy = await optionalAuthEmail();
 
   const { partNumber } = await context.params;
   const decoded = decodeURIComponent(partNumber).trim();
@@ -42,7 +39,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
     await notifyEngineeringMissingFinalStation({
       item,
-      reportedBy: authResult.email,
+      reportedBy,
     });
 
     return NextResponse.json({ ok: true });

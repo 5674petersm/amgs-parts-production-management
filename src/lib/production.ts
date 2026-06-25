@@ -3,6 +3,7 @@ import sql from "mssql";
 import { shouldUpdateInventory } from "@/lib/final-station";
 import { getOnHandQtyAtHistLoc, HIST_LOC_ID } from "@/lib/item-location";
 import { getPool } from "@/lib/db";
+import { productionHisText1Label } from "@/lib/permissions";
 import { getStockByItemId } from "@/lib/stock";
 import {
   bindDateTime2,
@@ -15,9 +16,6 @@ import type { ProductionSubmitPayload } from "@/types";
 
 /** MiniMRP inventory increase — matches existing Adjustment(+) rows. */
 const PRODUCTION_HIST_TYPE = "Adjustment(+)";
-
-/** Always recorded on tblitemhistory.HisText1 for production entries. */
-const HIS_TEXT1 = "mpete";
 
 export type RecordProductionResult = {
   newTotalQty: number;
@@ -59,7 +57,7 @@ export async function recordProduction(
       bindNVarChar(historyRequest, "histText", payload.opStation, 255);
       bindDecimal(historyRequest, "oldQty", oldQty);
       bindInt(historyRequest, "histLocId", HIST_LOC_ID);
-      bindNVarChar(historyRequest, "hisText1", HIS_TEXT1, 255);
+      bindNVarChar(historyRequest, "hisText1", productionHisText1Label(userEmail), 255);
 
       await historyRequest.query(`
           INSERT INTO dbo.tblitemhistory (

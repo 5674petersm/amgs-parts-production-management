@@ -6,7 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 
 export async function Header() {
   const session = await auth();
-  const role = session?.user?.role ?? "operator";
+  const role = session?.user?.role;
 
   return (
     <header className="site-header">
@@ -22,32 +22,36 @@ export async function Header() {
         />
         <p className="brand-title">Production Management System</p>
       </Link>
-      {session?.user?.email && (
-        <div className="user-block">
-          <nav className="header-nav" aria-label="Main">
-            {hasPermission(role, "production") && (
-              <Link href="/">Scan</Link>
-            )}
-            {hasPermission(role, "customParts") && (
-              <Link href="/custom-part">Custom parts</Link>
-            )}
-            {hasPermission(role, "editParts") && (
-              <Link href="/parts/edit">Edit parts</Link>
-            )}
-          </nav>
-          <span className="user-email">{session.user.email}</span>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/login" });
-            }}
-          >
-            <button type="submit" className="link-button">
-              Sign out
-            </button>
-          </form>
-        </div>
-      )}
+      <div className="user-block">
+        <nav className="header-nav" aria-label="Main">
+          <Link href="/">Scan</Link>
+          {role && hasPermission(role, "customParts") && (
+            <Link href="/custom-part">Custom parts</Link>
+          )}
+          {role && hasPermission(role, "editParts") && (
+            <Link href="/parts/edit">Edit parts</Link>
+          )}
+        </nav>
+        {session?.user?.email ? (
+          <>
+            <span className="user-email">{session.user.email}</span>
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/" });
+              }}
+            >
+              <button type="submit" className="link-button">
+                Sign out
+              </button>
+            </form>
+          </>
+        ) : (
+          <Link href="/login" className="link-button">
+            Sign in
+          </Link>
+        )}
+      </div>
     </header>
   );
 }

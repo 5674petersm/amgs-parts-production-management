@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { requirePermission } from "@/lib/api-auth";
+import { optionalAuthEmail } from "@/lib/api-auth";
 import { STATIONS, LOCATION_TYPES } from "@/constants/stations";
 import { recordProduction } from "@/lib/production";
 import type { ProductionSource } from "@/types";
 
 export async function POST(request: Request) {
-  const authResult = await requirePermission("production");
-  if ("response" in authResult) {
-    return authResult.response;
-  }
-  const userEmail = authResult.email;
+  const userEmail = await optionalAuthEmail();
 
   let body: {
     itemId?: number;

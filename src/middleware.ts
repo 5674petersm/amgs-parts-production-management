@@ -5,6 +5,7 @@ import { authConfig } from "@/auth.config";
 import {
   canAccessPath,
   defaultPathForRole,
+  isPublicPath,
   type Role,
 } from "@/lib/permissions";
 
@@ -13,9 +14,9 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const { pathname } = req.nextUrl;
-
-  const isPublic =
+  const isAuthRoute =
     pathname.startsWith("/login") || pathname.startsWith("/api/auth");
+  const isPublic = isPublicPath(pathname, req.method);
 
   if (!isLoggedIn && !isPublic) {
     const loginUrl = new URL("/login", req.nextUrl.origin);
@@ -31,7 +32,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL(defaultPathForRole(role), req.nextUrl.origin));
   }
 
-  if (isLoggedIn && !isPublic) {
+  if (isLoggedIn && !isAuthRoute && !isPublic) {
     const role = (req.auth?.user?.role ?? "operator") as Role;
     if (!canAccessPath(pathname, role)) {
       return NextResponse.redirect(

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { STATIONS } from "@/constants/stations";
-import { requireAnyPermission, requirePermission } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { parseItemIdFromQrKey } from "@/lib/parse-qr";
 import { getStockByItemId, updateStockItem } from "@/lib/stock";
 
@@ -10,10 +10,6 @@ type RouteContext = {
 };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const authResult = await requireAnyPermission(["production", "editParts"]);
-  if ("response" in authResult) {
-    return authResult.response;
-  }
   const { partNumber } = await context.params;
   const decoded = decodeURIComponent(partNumber).trim();
 
