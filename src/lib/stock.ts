@@ -16,6 +16,7 @@ type StockRow = {
   MasterPNo: string;
   ItemDescription: string;
   TotalQty: number;
+  MinQty: number;
   FinalStation: string | null;
 };
 
@@ -26,6 +27,7 @@ function stockSelectSql(): string {
     s.MasterPNo,
     s.ItemDescription,
     s.FinalStation,
+    COALESCE(s.MinQty, 0) AS MinQty,
     COALESCE(l.LocOnHandQty, 0) AS TotalQty
   FROM dbo.tblstockitems s
   LEFT JOIN dbo.tblitemlocation l
@@ -40,6 +42,7 @@ function mapRow(row: StockRow): StockItem {
     masterPNo: row.MasterPNo?.trim() ?? "",
     itemDescription: row.ItemDescription?.trim() ?? "",
     totalQty: Number(row.TotalQty),
+    minQty: Number(row.MinQty),
     finalStation: finalStation || null,
   };
 }
@@ -96,6 +99,7 @@ export async function searchStockItems(query: string): Promise<StockItem[]> {
         s.MasterPNo,
         s.ItemDescription,
         s.FinalStation,
+        COALESCE(s.MinQty, 0) AS MinQty,
         COALESCE(l.LocOnHandQty, 0) AS TotalQty
       FROM dbo.tblstockitems s
       LEFT JOIN dbo.tblitemlocation l
@@ -112,6 +116,7 @@ export type StockItemUpdate = {
   masterPNo: string;
   itemDescription: string;
   finalStation: string | null;
+  minQty: number;
   totalQty?: number;
 };
 
@@ -212,13 +217,15 @@ export async function updateStockItem(
     bindNVarChar(stockRequest, "masterPNo", update.masterPNo, 50);
     bindNVarChar(stockRequest, "itemDescription", update.itemDescription, 4000);
     bindNVarChar(stockRequest, "finalStation", update.finalStation ?? "", 50);
+    bindDecimal(stockRequest, "minQty", update.minQty);
 
     const stockResult = await stockRequest.query(`
       UPDATE dbo.tblstockitems
       SET
         MasterPNo = @masterPNo,
         ItemDescription = @itemDescription,
-        FinalStation = NULLIF(LTRIM(RTRIM(@finalStation)), '')
+        FinalStation = NULLIF(LTRIM(RTRIM(@finalStation)), ''),
+        MinQty = @minQty
       WHERE ItemID = @itemId;
 
       SELECT @@ROWCOUNT AS Affected;

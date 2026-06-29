@@ -25,6 +25,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
   const [editMasterPNo, setEditMasterPNo] = useState("");
   const [itemDescription, setItemDescription] = useState("");
   const [totalQty, setTotalQty] = useState("");
+  const [minQty, setMinQty] = useState("");
   const [finalStation, setFinalStation] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -38,6 +39,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
     setEditMasterPNo(selected.masterPNo);
     setItemDescription(selected.itemDescription);
     setTotalQty(String(selected.totalQty));
+    setMinQty(String(selected.minQty));
     setFinalStation(selected.finalStation ?? "");
     setError(null);
     setSaved(false);
@@ -97,6 +99,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
 
     return () => {
       cancelled = true;
+      preloadedItemId.current = null;
     };
   }, [initialItemId]);
 
@@ -169,6 +172,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
           masterPNo: editMasterPNo.trim(),
           itemDescription: itemDescription.trim(),
           totalQty: Number(totalQty),
+          minQty: Number(minQty),
           finalStation: finalStation || null,
         }),
       });
@@ -184,6 +188,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
       setEditMasterPNo(data.masterPNo);
       setItemDescription(data.itemDescription);
       setTotalQty(String(data.totalQty));
+      setMinQty(String(data.minQty));
       setFinalStation(data.finalStation ?? "");
       setSaved(true);
     } catch {
@@ -201,6 +206,7 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
     setEditMasterPNo("");
     setItemDescription("");
     setTotalQty("");
+    setMinQty("");
     setFinalStation("");
     setError(null);
     setSaved(false);
@@ -264,6 +270,22 @@ export function EditPartForm({ initialItemId }: EditPartFormProps) {
             <p className="hint field-hint">
               Changes are recorded in inventory history as a manual adjustment.
             </p>
+
+            <label>
+              Min Stock QTY
+              <input
+                type="number"
+                required
+                min={0}
+                step={1}
+                inputMode="numeric"
+                value={minQty}
+                onChange={(e) => {
+                  setMinQty(e.target.value);
+                  setSaved(false);
+                }}
+              />
+            </label>
 
             <label>
               Final station

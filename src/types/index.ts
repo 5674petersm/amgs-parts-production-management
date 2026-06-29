@@ -3,6 +3,7 @@ export type StockItem = {
   masterPNo: string;
   itemDescription: string;
   totalQty: number;
+  minQty: number;
   /** When set, inventory updates only at this station name. */
   finalStation: string | null;
 };

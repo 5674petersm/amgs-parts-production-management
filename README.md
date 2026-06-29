@@ -12,6 +12,8 @@ Mobile-friendly web app for operators to scan part QR codes, record production q
 
 **Existing databases:** run `sql/alter_tblcustomparts_completed.sql` and `sql/alter_tblproductionlog_custom_parts.sql` instead of recreating those tables.
 
+**Dashboard:** run `sql/grant_dashboard_read.sql` (replace `[your_app_user]` with your `DB_USER` login) so the app can read `tblproductionlog` for reports.
+
 4. Google Cloud OAuth client (Web application) with redirect URI:
    - `https://production.advmgs.com/api/auth/callback/google`
    - `http://localhost:3000/api/auth/callback/google` (local dev)
@@ -66,7 +68,11 @@ When an operator scans a part with no final station, they can tap **Send to Engi
 |------|--------|
 | **Operator** | Scan QR codes, manual lookup, record production (stock + custom) |
 | **Engineer** | Create custom parts, edit stock part description and final station |
-| **Admin** | All of the above |
+| **Admin** | All of the above, plus production dashboard |
+
+## Dashboard database permissions
+
+The app user needs `INSERT` on `tblproductionlog` for floor production and `SELECT` on `tblproductionlog` (plus `tblstockitems` and `tblcustomparts` for joins) for the admin dashboard. If the dashboard shows *SELECT permission was denied on tblproductionlog*, run `sql/grant_dashboard_read.sql` in SSMS or Google Cloud SQL after substituting your `DB_USER` login name.
 
 ## `tblproductionlog` columns
 

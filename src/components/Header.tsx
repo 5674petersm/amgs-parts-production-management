@@ -31,6 +31,9 @@ export async function Header() {
           {role && hasPermission(role, "editParts") && (
             <Link href="/parts/edit">Edit parts</Link>
           )}
+          {role && hasPermission(role, "dashboards") && (
+            <Link href="/dashboard">Dashboard</Link>
+          )}
         </nav>
         {session?.user?.email ? (
           <>

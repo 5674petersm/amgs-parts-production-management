@@ -56,6 +56,10 @@ main {
   padding: 0 1rem 2.5rem;
 }
 
+main:has(.dashboard-layout) {
+  max-width: 1100px;
+}
+
 .site-header {
   display: flex;
   justify-content: space-between;
@@ -545,4 +549,342 @@ main {
 .file-meta {
   color: var(--muted);
   font-weight: 400;
+}
+
+.dashboard-layout {
+  width: 100%;
+}
+
+.dashboard-title {
+  margin: 0 0 0.75rem;
+  color: var(--brand-gray);
+}
+
+.dashboard-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--border);
+}
+
+.dashboard-tab {
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  background: none;
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dashboard-tab:hover {
+  color: var(--brand-gray);
+  background: var(--brand-green-soft);
+}
+
+.dashboard-tab.active {
+  color: var(--brand-gray);
+  border-bottom-color: var(--brand-green);
+}
+
+.dashboard-filter {
+  margin-top: 1rem;
+}
+
+.dashboard-filter-fields {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .dashboard-filter-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.dashboard-filter label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--brand-gray);
+}
+
+.dashboard-filter input[type="date"] {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  color: var(--text);
+}
+
+.dashboard-filter input[type="date"]:focus {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 1px;
+  border-color: var(--brand-green);
+}
+
+.dashboard-filter-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 640px) {
+  .dashboard-filter-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.dashboard-filter .primary-button,
+.dashboard-filter .secondary-button {
+  margin-top: 0;
+}
+
+.dashboard-panels {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.dashboard-panel h2 {
+  margin: 0 0 0.35rem;
+  color: var(--brand-gray);
+}
+
+.dashboard-total {
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
+}
+
+.bar-chart {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.bar-chart-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) 1fr minmax(2.5rem, auto);
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.bar-chart-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--brand-gray);
+  line-height: 1.25;
+}
+
+.bar-chart-track {
+  height: 1.35rem;
+  background: #ececec;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.bar-chart-fill {
+  height: 100%;
+  min-width: 0;
+  background: linear-gradient(
+    90deg,
+    var(--brand-green) 0%,
+    var(--brand-green-dark) 100%
+  );
+  border-radius: 3px;
+  transition: width 0.25s ease;
+}
+
+.bar-chart-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--brand-gray);
+}
+
+.dashboard-table tbody tr:hover {
+  background: var(--brand-green-soft);
+}
+
+.inventory-filters {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 720px) {
+  .inventory-filters {
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
+  }
+}
+
+.inventory-filters label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--brand-gray);
+}
+
+.inventory-filters input[type="search"],
+.inventory-filters select {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  color: var(--text);
+}
+
+.inventory-filters input[type="search"]:focus,
+.inventory-filters select:focus {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 1px;
+  border-color: var(--brand-green);
+}
+
+.inventory-shortfall-filter {
+  margin-top: 0 !important;
+}
+
+.inventory-table tbody tr.inventory-shortfall {
+  background: #fde8e8;
+}
+
+.inventory-table tbody tr.inventory-shortfall:hover {
+  background: #f9d4d4;
+}
+
+.inventory-table tbody tr.inventory-below-min {
+  background: #fff8e6;
+}
+
+.inventory-table tbody tr.inventory-below-min:hover {
+  background: #fff0c7;
+}
+
+.inventory-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 1.25rem 0.65rem !important;
+}
+
+.inventory-part-link {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.inventory-part-link:hover {
+  text-decoration: underline;
+}
+
+.dashboard-table-wrap {
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.dashboard-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  vertical-align: bottom;
+}
+
+.sort-header-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sort-header-button:hover {
+  color: var(--brand-gray);
+}
+
+.sort-header-button-num {
+  margin-left: auto;
+}
+
+.dashboard-table th.num .sort-header-button {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.sort-header-icons {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  line-height: 0.65;
+}
+
+.sort-header-icon {
+  font-size: 0.55rem;
+  color: #c5c5c5;
+}
+
+.sort-header-icon.active {
+  color: var(--brand-green-dark);
+}
+
+.dashboard-table td.num,
+.dashboard-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 520px) {
+  .bar-chart-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "label value"
+      "track track";
+  }
+
+  .bar-chart-label {
+    grid-area: label;
+  }
+
+  .bar-chart-track {
+    grid-area: track;
+  }
+
+  .bar-chart-value {
+    grid-area: value;
+  }
 }

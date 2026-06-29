@@ -60,6 +60,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     masterPNo?: string;
     itemDescription?: string;
     finalStation?: string | null;
+    minQty?: number;
     totalQty?: number;
   };
   try {
@@ -107,6 +108,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
+  const minQty = Number(body.minQty);
+  if (!Number.isFinite(minQty) || minQty < 0) {
+    return NextResponse.json(
+      { error: "Min stock qty must be zero or greater." },
+      { status: 400 },
+    );
+  }
+
   try {
     const item = await updateStockItem(
       itemId,
@@ -114,6 +123,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         masterPNo,
         itemDescription,
         finalStation: finalStation || null,
+        minQty,
         totalQty:
           body.totalQty !== undefined ? Number(body.totalQty) : undefined,
       },

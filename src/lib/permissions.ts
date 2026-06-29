@@ -1,6 +1,6 @@
 export type Role = "admin" | "engineer" | "operator";
 
-export type Permission = "production" | "customParts" | "editParts";
+export type Permission = "production" | "customParts" | "editParts" | "dashboards";
 
 /** Recorded on production log entries when no one is signed in. */
 export const PRODUCTION_ANONYMOUS_USER = "floor";
@@ -22,7 +22,7 @@ export function productionHisText1Label(userEmail: string): string {
 }
 
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  admin: ["production", "customParts", "editParts"],
+  admin: ["production", "customParts", "editParts", "dashboards"],
   engineer: ["customParts", "editParts"],
   operator: ["production"],
 };
@@ -67,6 +67,9 @@ export function hasAnyPermission(
 }
 
 export function defaultPathForRole(role: Role): string {
+  if (hasPermission(role, "dashboards")) {
+    return "/dashboard";
+  }
   if (hasPermission(role, "customParts")) {
     return "/custom-part";
   }
@@ -125,6 +128,10 @@ export function canAccessPath(pathname: string, role: Role): boolean {
 
   if (pathname.startsWith("/parts/edit")) {
     return hasPermission(role, "editParts");
+  }
+
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/api/dashboard")) {
+    return hasPermission(role, "dashboards");
   }
 
   if (pathname.startsWith("/api/custom-parts")) {
