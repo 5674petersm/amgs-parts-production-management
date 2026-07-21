@@ -5,6 +5,9 @@ export const CUSTOM_PART_MATERIALS = [
   "1/4",
   "3/8",
   "1/2",
+  "1x1\"",
+  "2x2\"",
+  "3x3\"",
   "Aluminum",
 ] as const;
 
