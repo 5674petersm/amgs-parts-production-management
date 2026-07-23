@@ -252,22 +252,22 @@ export function QrScanHome({ canCreateCustomParts = false }: QrScanHomeProps) {
   }
 
   return (
-    <section>
-      <p className="notice">
-        Tap below to scan a part QR code and record production.
-      </p>
-      <button
-        type="button"
-        className="primary-button"
-        onClick={() => setPhase("scanning")}
-      >
-        Scan code
-      </button>
-      {canCreateCustomParts && (
-        <Link href="/custom-part" className="secondary-button link-as-button">
-          Add custom part
-        </Link>
-      )}
+    <section className="scan-home-card">
+        <p className="notice">
+          Tap below to scan a part QR code and record production.
+        </p>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => setPhase("scanning")}
+        >
+          Scan code
+        </button>
+        {canCreateCustomParts && (
+          <Link href="/custom-part" className="secondary-button link-as-button">
+            Add custom part
+          </Link>
+        )}
     </section>
   );
 }

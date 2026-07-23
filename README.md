@@ -37,6 +37,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `DB_SERVER`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | SQL Server connection |
 | `DB_ENCRYPT`, `DB_TRUST_SERVER_CERTIFICATE` | TLS options |
 | `PLANT_TIMEZONE` | IANA zone for `tblproductionlog.TimeStamp` (e.g. `America/Chicago`) |
+| `DASHBOARD_API_URL` | Internal dashboard base URL used for the shared shop-floor production log (default `http://127.0.0.1:3000`) |
+| `SHOP_FLOOR_API_TOKEN` | Shared secret used by production to read/write dashboard workflow details; set the same value in the dashboard app |
 | `AUTH_SECRET` | Random secret for sessions |
 | `AUTH_URL` | Public app URL |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google OAuth |

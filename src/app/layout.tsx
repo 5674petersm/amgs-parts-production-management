@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { Header } from "@/components/Header";
+import { FloorTabs } from "@/components/FloorTabs";
 import { AMGS_LOGO_URL } from "@/constants/branding";
 
 import "./globals.css";
@@ -23,6 +24,7 @@ export default function RootLayout({
       <body>
         <main>
           <Header />
+          <FloorTabs />
           {children}
         </main>
       </body>

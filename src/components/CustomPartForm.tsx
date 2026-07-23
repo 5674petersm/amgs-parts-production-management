@@ -5,7 +5,9 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { CUSTOM_PART_MATERIALS } from "@/constants/custom-part-materials";
 import type {
+  CurrentCustomPart,
   CustomPartDraft,
+  CustomPartOrderLineChoice,
   CustomPartOrderLookup,
   CustomPartUploadResponse,
 } from "@/types/custom-part";
@@ -52,6 +54,10 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
         <dd>{draft.hasCustomColor ? draft.customColor : "No"}</dd>
       </div>
       <div>
+        <dt>Mapped order line</dt>
+        <dd>{draft.mappedOrderLineId || "None"}</dd>
+      </div>
+      <div>
         <dt>Drawings</dt>
         <dd>
           <ul className="file-list compact">
@@ -68,19 +74,32 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
   );
 }
 
-export function CustomPartForm() {
+export function CustomPartForm({
+  initialOrderNumber = "",
+  editPart = null,
+  onSaved,
+}: {
+  initialOrderNumber?: string;
+  editPart?: CurrentCustomPart | null;
+  onSaved?: () => void;
+} = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [amgsOrderNumber, setAmgsOrderNumber] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [nextPartNumber, setNextPartNumber] = useState("");
+  const isEditing = Boolean(editPart);
+  const [amgsOrderNumber, setAmgsOrderNumber] = useState(editPart?.orderNumber || initialOrderNumber);
+  const [customerName, setCustomerName] = useState(editPart?.customerName || "");
+  const [nextPartNumber, setNextPartNumber] = useState(editPart?.partNumber || "");
   const [orderPartCount, setOrderPartCount] = useState(0);
   const [orderLookupLoading, setOrderLookupLoading] = useState(false);
   const [orderLookupError, setOrderLookupError] = useState<string | null>(null);
-  const [description, setDescription] = useState("");
-  const [qtyNeeded, setQtyNeeded] = useState("");
-  const [material, setMaterial] = useState("");
-  const [hasCustomColor, setHasCustomColor] = useState(false);
-  const [customColor, setCustomColor] = useState("");
+  const [description, setDescription] = useState(editPart?.description || "");
+  const [qtyNeeded, setQtyNeeded] = useState(editPart ? String(editPart.qtyNeeded) : "");
+  const [material, setMaterial] = useState(editPart?.material || "");
+  const [hasCustomColor, setHasCustomColor] = useState(editPart?.hasCustomColor || false);
+  const [customColor, setCustomColor] = useState(editPart?.customColor || "");
+  const [mappedOrderLineId, setMappedOrderLineId] = useState(editPart?.mappedOrderLineId || "");
+  const [orderLines, setOrderLines] = useState<CustomPartOrderLineChoice[]>([]);
+  const [orderChoices, setOrderChoices] = useState<{ order: string; customer: string }[]>([]);
+  const [lookupVersion, setLookupVersion] = useState(0);
   const [drawingFiles, setDrawingFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -88,6 +107,15 @@ export function CustomPartForm() {
   const [saved, setSaved] = useState(false);
   const [draft, setDraft] = useState<CustomPartDraft | null>(null);
   const [folderUrl, setFolderUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/shop-floor-orders", { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json() as { orders?: { order: string; customer: string }[] };
+        if (response.ok) setOrderChoices(result.orders ?? []);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const order = amgsOrderNumber.trim();
@@ -120,7 +148,7 @@ export function CustomPartForm() {
         }
 
         const lookup = data as CustomPartOrderLookup;
-        setNextPartNumber(lookup.nextPartNumber);
+        if (!isEditing) setNextPartNumber(lookup.nextPartNumber);
         setOrderPartCount(lookup.partCount);
         if (lookup.existingCustomerName) {
           setCustomerName((current) => current.trim() || lookup.existingCustomerName || "");
@@ -129,7 +157,7 @@ export function CustomPartForm() {
         if (lookupError instanceof DOMException && lookupError.name === "AbortError") {
           return;
         }
-        setNextPartNumber("");
+        if (!isEditing) setNextPartNumber("");
         setOrderPartCount(0);
         setOrderLookupError(
           lookupError instanceof Error
@@ -143,6 +171,27 @@ export function CustomPartForm() {
       }
     }, 400);
 
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [amgsOrderNumber, isEditing, lookupVersion]);
+
+  useEffect(() => {
+    const order = amgsOrderNumber.trim();
+    if (!order) {
+      setOrderLines([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/custom-parts/order-lines?order=${encodeURIComponent(order)}`, { signal: controller.signal })
+        .then(async (response) => {
+          const result = await response.json() as { lines?: CustomPartOrderLineChoice[] };
+          if (response.ok) setOrderLines(result.lines ?? []);
+        })
+        .catch(() => {});
+    }, 300);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
@@ -203,7 +252,7 @@ export function CustomPartForm() {
       return;
     }
 
-    if (drawingFiles.length === 0) {
+    if (!isEditing && drawingFiles.length === 0) {
       setError("Add at least one drawing file.");
       return;
     }
@@ -218,6 +267,7 @@ export function CustomPartForm() {
       hasCustomColor,
       customColor: customColor.trim(),
       drawingFiles,
+      mappedOrderLineId,
     });
     setReviewing(true);
   }
@@ -238,13 +288,14 @@ export function CustomPartForm() {
     formData.append("material", draft.material);
     formData.append("hasCustomColor", String(draft.hasCustomColor));
     formData.append("customColor", draft.customColor);
+    formData.append("mappedOrderLineId", draft.mappedOrderLineId);
     for (const file of draft.drawingFiles) {
       formData.append("drawings", file);
     }
 
     try {
-      const response = await fetch("/api/custom-parts", {
-        method: "POST",
+      const response = await fetch(isEditing ? `/api/custom-parts/${editPart!.customPartId}` : "/api/custom-parts", {
+        method: isEditing ? "PATCH" : "POST",
         body: formData,
       });
 
@@ -258,8 +309,8 @@ export function CustomPartForm() {
       }
 
       const result = data as CustomPartUploadResponse;
-      setDraft({ ...draft, partNumber: result.partNumber });
-      setFolderUrl(result.folderUrl);
+      setDraft({ ...draft, partNumber: isEditing ? editPart!.partNumber : result.partNumber });
+      setFolderUrl(isEditing ? editPart!.folderUrl : result.folderUrl);
       setSaved(true);
       setReviewing(false);
     } catch (uploadError) {
@@ -279,12 +330,18 @@ export function CustomPartForm() {
   }
 
   function handleCreateAnother() {
+    if (isEditing) {
+      onSaved?.();
+      return;
+    }
     setSaved(false);
     setReviewing(false);
     setDraft(null);
     setFolderUrl(null);
-    setAmgsOrderNumber("");
-    setCustomerName("");
+    const retainedOrder = amgsOrderNumber;
+    const retainedCustomer = customerName;
+    setAmgsOrderNumber(retainedOrder);
+    setCustomerName(retainedCustomer);
     setNextPartNumber("");
     setOrderPartCount(0);
     setOrderLookupError(null);
@@ -294,16 +351,18 @@ export function CustomPartForm() {
     setHasCustomColor(false);
     setCustomColor("");
     setDrawingFiles([]);
+    setMappedOrderLineId("");
     setError(null);
+    setLookupVersion((value) => value + 1);
   }
 
   if (saved && draft && folderUrl) {
     return (
       <section>
         <div className="card success-card">
-          <h2>Saved to Google Drive</h2>
+          <h2>{isEditing ? "Custom part updated" : "Saved to Google Drive"}</h2>
           <p>
-            Drawings and part details were uploaded to the shared drive folder.
+            {isEditing ? "Part details were updated." : "Drawings and part details were uploaded to the shared drive folder."}
           </p>
           <PartDetails draft={draft} />
           <p className="hint">
@@ -318,11 +377,9 @@ export function CustomPartForm() {
             className="primary-button"
             onClick={handleCreateAnother}
           >
-            Add another custom part
+            {isEditing ? "Done" : `Add another part to order #${amgsOrderNumber}`}
           </button>
-          <Link href="/" className="secondary-button link-as-button">
-            Back to scan
-          </Link>
+          {!isEditing && <Link href="/custom-parts" className="secondary-button link-as-button">Back to custom parts</Link>}
         </div>
       </section>
     );
@@ -333,7 +390,7 @@ export function CustomPartForm() {
       <section>
         <div className="card">
           <h2>Review custom part</h2>
-          <p>Confirm details, then save drawings to the shared Google Drive.</p>
+          <p>{isEditing ? "Confirm the updated details and optional new files." : "Confirm details, then save drawings to the shared Google Drive."}</p>
           <PartDetails draft={draft} />
         </div>
 
@@ -346,7 +403,7 @@ export function CustomPartForm() {
             onClick={handleSaveToDrive}
             disabled={uploading}
           >
-            {uploading ? "Uploading…" : "Save to Google Drive"}
+            {uploading ? "Saving…" : isEditing ? "Update custom part" : "Save to Google Drive"}
           </button>
           <button
             type="button"
@@ -375,10 +432,20 @@ export function CustomPartForm() {
             type="text"
             required
             value={amgsOrderNumber}
-            onChange={(e) => setAmgsOrderNumber(e.target.value)}
+            list="custom-part-order-options"
+            onChange={(e) => {
+              const value = e.target.value;
+              setAmgsOrderNumber(value);
+              const selected = orderChoices.find((order) => order.order === value.trim());
+              if (selected) setCustomerName(selected.customer);
+            }}
+            disabled={isEditing}
             placeholder="e.g. 1234"
             autoComplete="off"
           />
+          <datalist id="custom-part-order-options">
+            {orderChoices.map((order) => <option value={order.order} key={order.order}>{order.customer}</option>)}
+          </datalist>
         </label>
 
         <div className="field-block">
@@ -451,6 +518,18 @@ export function CustomPartForm() {
           </select>
         </label>
 
+        <label>
+          Related order line <span className="field-optional">(optional)</span>
+          <select value={mappedOrderLineId} onChange={(e) => setMappedOrderLineId(e.target.value)}>
+            <option value="">No line-item mapping</option>
+            {orderLines.map((line) => (
+              <option value={line.rowId} key={line.rowId}>
+                {line.lineNumber ? `Line ${line.lineNumber} · ` : ""}{line.partNumber}{line.description ? ` · ${line.description}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="checkbox-label">
           <input
             type="checkbox"
@@ -482,8 +561,7 @@ export function CustomPartForm() {
         <div className="field-block">
           <span className="field-label">Drawing files</span>
           <p className="hint field-hint">
-            PDF, images, CAD, or other drawing formats. You can select multiple
-            files (max 50 MB each).
+            PDF, images, CAD, or other drawing formats. {isEditing ? "New files are optional and will be added to the existing folder." : "Add one or more files."} Max 50 MB each.
           </p>
           <input
             ref={fileInputRef}
@@ -517,12 +595,12 @@ export function CustomPartForm() {
         {error && <p className="error">{error}</p>}
 
         <button type="submit" className="primary-button">
-          Review custom part
+          {isEditing ? "Review changes" : "Review custom part"}
         </button>
       </form>
 
       <p className="hint" style={{ marginTop: "1rem" }}>
-        <Link href="/">Back to scan</Link>
+        <Link href="/custom-parts">Back to custom parts</Link>
       </p>
     </section>
   );

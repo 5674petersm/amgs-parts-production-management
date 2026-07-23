@@ -7,7 +7,7 @@ import {
   bindNVarChar,
 } from "@/lib/sql-request";
 import { plantLocalTimestampForSql } from "@/lib/time";
-import type { CustomPartListItem } from "@/types/custom-part";
+import type { CurrentCustomPart, CustomPartListItem } from "@/types/custom-part";
 
 export type CustomPartOrderLookup = {
   amgsOrderNumber: string;
@@ -26,6 +26,7 @@ export type CustomPartRecordInput = {
   hasCustomColor: boolean;
   customColor: string;
   submittedBy: string;
+  mappedOrderLineId?: string;
 };
 
 export type ReservedCustomPart = {
@@ -56,6 +57,58 @@ export async function listCustomPartOrders(): Promise<string[]> {
   return result.recordset
     .map((row) => row.AMGSOrderNumber?.trim() ?? "")
     .filter(Boolean);
+}
+
+export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]> {
+  const pool = await getPool();
+  const result = await pool.request().query<{
+    CustomPartID: number;
+    AMGSOrderNumber: string;
+    CustomerName: string;
+    PartNumber: string;
+    Description: string;
+    QtyNeeded: number;
+    Material: string;
+    HasCustomColor: boolean;
+    CustomColor: string | null;
+    GoogleDriveFolderUrl: string;
+    GoogleDrivePartFolderId: string;
+  }>(`
+    SELECT
+      CustomPartID,
+      AMGSOrderNumber,
+      CustomerName,
+      PartNumber,
+      Description,
+      QtyNeeded,
+      Material,
+      HasCustomColor,
+      CustomColor,
+      GoogleDriveFolderUrl,
+      GoogleDrivePartFolderId
+    FROM dbo.tblcustomparts
+    WHERE CompletedAt IS NULL
+      AND NULLIF(LTRIM(RTRIM(GoogleDrivePartFolderId)), N'') IS NOT NULL
+    ORDER BY AMGSOrderNumber ASC, PartSequence ASC
+  `);
+
+  return result.recordset.map((row) => ({
+    customPartId: Number(row.CustomPartID),
+    orderNumber: row.AMGSOrderNumber.trim(),
+    customerName: row.CustomerName.trim(),
+    partNumber: row.PartNumber.trim(),
+    description: row.Description.trim(),
+    qtyNeeded: Number(row.QtyNeeded),
+    material: row.Material.trim(),
+    color: row.HasCustomColor ? row.CustomColor?.trim() || "Custom" : "Standard",
+    hasCustomColor: Boolean(row.HasCustomColor),
+    customColor: row.CustomColor?.trim() || "",
+    folderUrl: row.GoogleDriveFolderUrl?.trim()
+      || `https://drive.google.com/drive/folders/${row.GoogleDrivePartFolderId.trim()}`,
+    driveFolderId: row.GoogleDrivePartFolderId.trim(),
+    files: [],
+    mappedOrderLineId: "",
+  }));
 }
 
 export async function listCustomPartsByOrder(
@@ -102,7 +155,57 @@ export async function listCustomPartsByOrder(
     description: row.Description.trim(),
     qtyNeeded: Number(row.QtyNeeded),
     material: row.Material.trim(),
+    mappedOrderLineId: "",
     completedAt: row.CompletedAt ? row.CompletedAt.toISOString() : null,
+  }));
+}
+
+export type CustomPartDriveFolder = {
+  customPartId: number;
+  partNumber: string;
+  description: string;
+  folderId: string;
+  folderUrl: string;
+  mappedOrderLineId: string;
+};
+
+export async function listCustomPartDriveFoldersByOrder(
+  amgsOrderNumber: string,
+): Promise<CustomPartDriveFolder[]> {
+  const order = normalizeOrderNumber(amgsOrderNumber);
+  if (!order) {
+    throw new Error("AMGS order number is required.");
+  }
+
+  const pool = await getPool();
+  const request = pool.request();
+  bindNVarChar(request, "orderNumber", order, 50);
+  const result = await request.query<{
+    CustomPartID: number;
+    PartNumber: string;
+    Description: string;
+    GoogleDrivePartFolderId: string | null;
+    GoogleDriveFolderUrl: string | null;
+  }>(`
+    SELECT
+      CustomPartID,
+      PartNumber,
+      Description,
+      GoogleDrivePartFolderId,
+      GoogleDriveFolderUrl
+    FROM dbo.tblcustomparts
+    WHERE AMGSOrderNumber = @orderNumber
+      AND NULLIF(LTRIM(RTRIM(GoogleDrivePartFolderId)), N'') IS NOT NULL
+    ORDER BY PartSequence ASC
+  `);
+
+  return result.recordset.map((row) => ({
+    customPartId: Number(row.CustomPartID),
+    partNumber: row.PartNumber.trim(),
+    description: row.Description.trim(),
+    folderId: row.GoogleDrivePartFolderId?.trim() || "",
+    folderUrl: row.GoogleDriveFolderUrl?.trim() || "",
+    mappedOrderLineId: "",
   }));
 }
 
@@ -252,6 +355,45 @@ export async function updateCustomPartDriveInfo(
       GoogleDriveFolderUrl = @folderUrl
     WHERE CustomPartID = @customPartId
   `);
+}
+
+export async function updateCustomPartDetails(
+  customPartId: number,
+  input: Pick<CustomPartRecordInput,
+    "customerName" | "description" | "qtyNeeded" | "material" | "hasCustomColor" | "customColor" | "mappedOrderLineId"
+  >,
+): Promise<void> {
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "customPartId", customPartId);
+  bindNVarChar(request, "customerName", input.customerName, 200);
+  bindNVarChar(request, "description", input.description, 4000);
+  bindInt(request, "qtyNeeded", input.qtyNeeded);
+  bindNVarChar(request, "material", input.material, 50);
+  request.input("hasCustomColor", input.hasCustomColor ? 1 : 0);
+  bindNVarChar(request, "customColor", input.customColor, 100);
+  await request.query(`
+    UPDATE dbo.tblcustomparts
+    SET CustomerName = @customerName,
+        Description = @description,
+        QtyNeeded = @qtyNeeded,
+        Material = @material,
+        HasCustomColor = @hasCustomColor,
+        CustomColor = NULLIF(@customColor, N'')
+    WHERE CustomPartID = @customPartId
+  `);
+}
+
+export async function getCustomPartDriveFolderId(customPartId: number): Promise<string> {
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "customPartId", customPartId);
+  const result = await request.query<{ GoogleDrivePartFolderId: string | null }>(`
+    SELECT GoogleDrivePartFolderId
+    FROM dbo.tblcustomparts
+    WHERE CustomPartID = @customPartId
+  `);
+  return result.recordset[0]?.GoogleDrivePartFolderId?.trim() || "";
 }
 
 export async function deleteCustomPart(customPartId: number): Promise<void> {

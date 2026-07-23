@@ -89,7 +89,39 @@ export function isPublicPath(pathname: string, method = "GET"): boolean {
     return true;
   }
 
+  if (
+    pathname.startsWith("/orders")
+    || pathname.startsWith("/parts-demand")
+    || pathname.startsWith("/custom-parts")
+  ) {
+    return true;
+  }
+
   if (pathname === "/api/production") {
+    return true;
+  }
+
+  if (pathname === "/api/shop-floor-orders" || pathname.startsWith("/api/shop-floor-orders/")) {
+    return true;
+  }
+
+  if (pathname === "/api/parts-demand" || pathname === "/api/custom-parts/current") {
+    return true;
+  }
+
+  if (pathname.startsWith("/api/custom-part-files/")) {
+    return true;
+  }
+
+  if (pathname.startsWith("/api/cad-assets/")) {
+    return true;
+  }
+
+  if (pathname.startsWith("/api/panel-documents") || pathname === "/api/panel-orders") {
+    return true;
+  }
+
+  if (pathname.startsWith("/api/assigned-panel-documents/")) {
     return true;
   }
 

@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { google } from "googleapis";
 
 import { loadServiceAccountCredentials } from "@/lib/google-service-account";
+import { listCustomPartDriveFoldersByOrder } from "@/lib/custom-parts";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 
@@ -24,6 +25,22 @@ export type CustomPartUploadResult = {
   partFolderId: string;
   folderUrl: string;
   uploadedFiles: { name: string; id: string }[];
+};
+
+export type CustomPartDriveFileGroup = {
+  customPartId: number;
+  partNumber: string;
+  description: string;
+  folderUrl: string;
+  files: { id: string; name: string; mimeType: string; url: string }[];
+  mappedOrderLineId: string;
+};
+
+export type DirectDriveFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  url: string;
 };
 
 function getDriveClient() {
@@ -211,4 +228,85 @@ export async function uploadCustomPartToDrive(
     folderUrl: `https://drive.google.com/drive/folders/${partFolderId}`,
     uploadedFiles,
   };
+}
+
+export async function listCustomPartFilesForOrder(
+  orderNumber: string,
+): Promise<CustomPartDriveFileGroup[]> {
+  const folders = await listCustomPartDriveFoldersByOrder(orderNumber);
+  if (!folders.length) {
+    return [];
+  }
+
+  const drive = getDriveClient();
+  return Promise.all(folders.map(async (folder) => {
+    const files = await listCustomPartFilesInFolder(folder.folderId, drive);
+
+    return {
+      customPartId: folder.customPartId,
+      partNumber: folder.partNumber,
+      description: folder.description,
+      folderUrl: folder.folderUrl || `https://drive.google.com/drive/folders/${folder.folderId}`,
+      files,
+      mappedOrderLineId: folder.mappedOrderLineId,
+    };
+  }));
+}
+
+export async function listCustomPartFilesInFolder(
+  folderId: string,
+  existingDrive?: ReturnType<typeof google.drive>,
+): Promise<DirectDriveFile[]> {
+  const drive = existingDrive ?? getDriveClient();
+  const result = await drive.files.list({
+    q: `'${escapeDriveQueryValue(folderId)}' in parents and trashed=false`,
+    fields: "files(id,name,mimeType)",
+    orderBy: "name",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  return (result.data.files ?? [])
+    .filter((file) => file.id && file.name && file.name !== "part-details.txt")
+    .map((file) => ({
+      id: file.id!,
+      name: file.name!,
+      mimeType: file.mimeType || "application/octet-stream",
+      url: `/api/custom-part-files/${encodeURIComponent(file.id!)}`,
+    }));
+}
+
+export async function downloadCustomPartFile(fileId: string): Promise<{
+  name: string;
+  mimeType: string;
+  stream: Readable;
+}> {
+  const drive = getDriveClient();
+  const metadata = await drive.files.get({
+    fileId,
+    fields: "id,name,mimeType",
+    supportsAllDrives: true,
+  });
+  const response = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "stream" },
+  );
+  return {
+    name: metadata.data.name || "custom-part-file",
+    mimeType: metadata.data.mimeType || "application/octet-stream",
+    stream: response.data as Readable,
+  };
+}
+
+export async function uploadFilesToCustomPartFolder(
+  folderId: string,
+  files: { name: string; mimeType: string; buffer: Buffer }[],
+): Promise<{ name: string; id: string }[]> {
+  const drive = getDriveClient();
+  return Promise.all(files.map((file) => uploadBuffer(
+    drive,
+    folderId,
+    file.name,
+    file.mimeType || "application/octet-stream",
+    file.buffer,
+  )));
 }

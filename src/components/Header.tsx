@@ -24,9 +24,8 @@ export async function Header() {
       </Link>
       <div className="user-block">
         <nav className="header-nav" aria-label="Main">
-          <Link href="/">Scan</Link>
           {role && hasPermission(role, "customParts") && (
-            <Link href="/custom-part">Custom parts</Link>
+            <Link href="/custom-parts">Manage custom parts</Link>
           )}
           {role && hasPermission(role, "editParts") && (
             <Link href="/parts/edit">Edit parts</Link>
