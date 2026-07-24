@@ -33,7 +33,7 @@ export type CustomPartDriveFileGroup = {
   description: string;
   folderUrl: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
-  mappedOrderLineId: string;
+  mappedOrderLineIds: string[];
 };
 
 export type DirectDriveFile = {
@@ -248,7 +248,7 @@ export async function listCustomPartFilesForOrder(
       description: folder.description,
       folderUrl: folder.folderUrl || `https://drive.google.com/drive/folders/${folder.folderId}`,
       files,
-      mappedOrderLineId: folder.mappedOrderLineId,
+      mappedOrderLineIds: folder.mappedOrderLineIds,
     };
   }));
 }

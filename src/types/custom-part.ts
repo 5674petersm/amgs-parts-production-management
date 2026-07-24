@@ -9,7 +9,7 @@ export type CustomPartListItem = {
   qtyNeeded: number;
   material: string;
   completedAt: string | null;
-  mappedOrderLineId?: string;
+  mappedOrderLineIds?: string[];
 };
 
 export type CustomProductionSubmitPayload = {
@@ -33,7 +33,7 @@ export type CustomPartDraft = {
   hasCustomColor: boolean;
   customColor: string;
   drawingFiles: File[];
-  mappedOrderLineId: string;
+  mappedOrderLineIds: string[];
 };
 
 export type CustomPartOrderLookup = {
@@ -67,7 +67,7 @@ export type CurrentCustomPart = {
   folderUrl: string;
   driveFolderId: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
-  mappedOrderLineId: string;
+  mappedOrderLineIds: string[];
 };
 
 export type CustomPartOrderLineChoice = {

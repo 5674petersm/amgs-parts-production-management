@@ -12,10 +12,15 @@ export async function GET() {
       listCurrentDriveCustomParts(),
       getCustomPartLineMappings(),
     ]);
-    const mappingByPart = new Map(mappings.map((mapping) => [mapping.customPartId, mapping.orderLineId]));
+    const mappingByPart = new Map<string, string[]>();
+    mappings.forEach((mapping) => {
+      const lines = mappingByPart.get(mapping.customPartId) ?? [];
+      lines.push(mapping.orderLineId);
+      mappingByPart.set(mapping.customPartId, lines);
+    });
     const withFiles = await Promise.all(parts.map(async (part) => ({
       ...part,
-      mappedOrderLineId: mappingByPart.get(String(part.customPartId)) || "",
+      mappedOrderLineIds: mappingByPart.get(String(part.customPartId)) || [],
       files: await listCustomPartFilesInFolder(part.driveFolderId).catch((error) => {
         console.error(`Unable to list files for ${part.partNumber}`, error);
         return [];

@@ -13,7 +13,7 @@ import {
   updateCustomPartDriveInfo,
 } from "@/lib/custom-parts";
 import { uploadCustomPartToDrive } from "@/lib/google-drive";
-import { setCustomPartLineMapping, validateCustomPartLineMapping } from "@/lib/shop-floor-orders";
+import { setCustomPartLineMappings, validateCustomPartLineMappings } from "@/lib/shop-floor-orders";
 
 export const maxDuration = 120;
 
@@ -38,7 +38,9 @@ export async function POST(request: Request) {
   const hasCustomColor = String(formData.get("hasCustomColor") ?? "") === "true";
   const customColor = String(formData.get("customColor") ?? "").trim();
   const qtyNeeded = Number(formData.get("qtyNeeded"));
-  const mappedOrderLineId = String(formData.get("mappedOrderLineId") ?? "").trim();
+  const mappedOrderLineIds = [...new Set(formData.getAll("mappedOrderLineIds")
+    .map((value) => String(value).trim())
+    .filter(Boolean))];
   const drawingEntries = formData.getAll("drawings");
 
   if (!amgsOrderNumber || !customerName || !description || !material) {
@@ -103,7 +105,7 @@ export async function POST(request: Request) {
   let reservedPartId: number | null = null;
 
   try {
-    await validateCustomPartLineMapping(amgsOrderNumber, mappedOrderLineId);
+    await validateCustomPartLineMappings(amgsOrderNumber, mappedOrderLineIds);
     const reserved = await reserveCustomPartNumber({
       amgsOrderNumber,
       customerName,
@@ -113,7 +115,7 @@ export async function POST(request: Request) {
       hasCustomColor,
       customColor: hasCustomColor ? customColor : "",
       submittedBy: userEmail,
-      mappedOrderLineId,
+      mappedOrderLineIds,
     });
     reservedPartId = reserved.customPartId;
 
@@ -143,10 +145,10 @@ export async function POST(request: Request) {
       partFolderId: driveResult.partFolderId,
       folderUrl: driveResult.folderUrl,
     });
-    await setCustomPartLineMapping({
+    await setCustomPartLineMappings({
       customPartId: reserved.customPartId,
       orderNumber: amgsOrderNumber,
-      orderLineId: mappedOrderLineId,
+      orderLineIds: mappedOrderLineIds,
     });
 
     return NextResponse.json({

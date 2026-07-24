@@ -26,7 +26,7 @@ export type CustomPartRecordInput = {
   hasCustomColor: boolean;
   customColor: string;
   submittedBy: string;
-  mappedOrderLineId?: string;
+  mappedOrderLineIds?: string[];
 };
 
 export type ReservedCustomPart = {
@@ -107,7 +107,7 @@ export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]
       || `https://drive.google.com/drive/folders/${row.GoogleDrivePartFolderId.trim()}`,
     driveFolderId: row.GoogleDrivePartFolderId.trim(),
     files: [],
-    mappedOrderLineId: "",
+    mappedOrderLineIds: [],
   }));
 }
 
@@ -155,7 +155,7 @@ export async function listCustomPartsByOrder(
     description: row.Description.trim(),
     qtyNeeded: Number(row.QtyNeeded),
     material: row.Material.trim(),
-    mappedOrderLineId: "",
+    mappedOrderLineIds: [],
     completedAt: row.CompletedAt ? row.CompletedAt.toISOString() : null,
   }));
 }
@@ -166,7 +166,7 @@ export type CustomPartDriveFolder = {
   description: string;
   folderId: string;
   folderUrl: string;
-  mappedOrderLineId: string;
+  mappedOrderLineIds: string[];
 };
 
 export async function listCustomPartDriveFoldersByOrder(
@@ -205,7 +205,7 @@ export async function listCustomPartDriveFoldersByOrder(
     description: row.Description.trim(),
     folderId: row.GoogleDrivePartFolderId?.trim() || "",
     folderUrl: row.GoogleDriveFolderUrl?.trim() || "",
-    mappedOrderLineId: "",
+    mappedOrderLineIds: [],
   }));
 }
 
@@ -360,7 +360,7 @@ export async function updateCustomPartDriveInfo(
 export async function updateCustomPartDetails(
   customPartId: number,
   input: Pick<CustomPartRecordInput,
-    "customerName" | "description" | "qtyNeeded" | "material" | "hasCustomColor" | "customColor" | "mappedOrderLineId"
+    "customerName" | "description" | "qtyNeeded" | "material" | "hasCustomColor" | "customColor"
   >,
 ): Promise<void> {
   const pool = await getPool();

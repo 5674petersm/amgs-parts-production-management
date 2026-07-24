@@ -191,7 +191,7 @@ function FloorOrderCard({
                 <p className="order-detail-message">Items can be completed after engineering releases the order.</p>
               )}
               {detail.lines.length ? detail.lines.map((line) => {
-                const mappedParts = detail.files.filter((file) => file.mappedOrderLineId === line.rowId);
+                const mappedParts = detail.files.filter((file) => file.mappedOrderLineIds.includes(line.rowId));
                 const panelDocuments = detail.panelDocuments.filter((document) => document.orderLineId === line.rowId);
                 const hasPanelDocuments = panelDocuments.length > 0;
                 const hasLineDetail = mappedParts.length > 0 || hasPanelDocuments;

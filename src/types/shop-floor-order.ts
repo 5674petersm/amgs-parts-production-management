@@ -30,7 +30,7 @@ export type ShopFloorOrderFileGroup = {
   description: string;
   folderUrl: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
-  mappedOrderLineId: string;
+  mappedOrderLineIds: string[];
 };
 
 export type ShopFloorPanelDocument = {

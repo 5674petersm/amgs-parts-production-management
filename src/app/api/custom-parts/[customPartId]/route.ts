@@ -9,7 +9,7 @@ import {
 import { requirePermission } from "@/lib/api-auth";
 import { getCustomPartDriveFolderId, updateCustomPartDetails } from "@/lib/custom-parts";
 import { uploadFilesToCustomPartFolder } from "@/lib/google-drive";
-import { setCustomPartLineMapping, validateCustomPartLineMapping } from "@/lib/shop-floor-orders";
+import { setCustomPartLineMappings, validateCustomPartLineMappings } from "@/lib/shop-floor-orders";
 
 type RouteContext = { params: Promise<{ customPartId: string }> };
 
@@ -31,7 +31,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   const material = String(formData.get("material") ?? "").trim();
   const hasCustomColor = String(formData.get("hasCustomColor") ?? "") === "true";
   const customColor = String(formData.get("customColor") ?? "").trim();
-  const mappedOrderLineId = String(formData.get("mappedOrderLineId") ?? "").trim();
+  const mappedOrderLineIds = [...new Set(formData.getAll("mappedOrderLineIds")
+    .map((value) => String(value).trim())
+    .filter(Boolean))];
   const qtyNeeded = Number(formData.get("qtyNeeded"));
   const files = formData.getAll("drawings").filter(
     (entry): entry is File => entry instanceof File && entry.size > 0,
@@ -56,7 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   try {
-    await validateCustomPartLineMapping(orderNumber, mappedOrderLineId);
+    await validateCustomPartLineMappings(orderNumber, mappedOrderLineIds);
     await updateCustomPartDetails(customPartId, {
       customerName,
       description,
@@ -64,12 +66,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       material,
       hasCustomColor,
       customColor: hasCustomColor ? customColor : "",
-      mappedOrderLineId,
     });
-    await setCustomPartLineMapping({
+    await setCustomPartLineMappings({
       customPartId,
       orderNumber,
-      orderLineId: mappedOrderLineId,
+      orderLineIds: mappedOrderLineIds,
     });
     if (files.length) {
       const driveFolderId = await getCustomPartDriveFolderId(customPartId);

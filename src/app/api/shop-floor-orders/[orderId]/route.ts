@@ -27,13 +27,18 @@ export async function GET(_request: Request, context: RouteContext) {
       ),
       getCustomPartLineMappings(orderId),
     ]);
-    const mappingByPart = new Map(mappings.map((mapping) => [mapping.customPartId, mapping.orderLineId]));
+    const mappingByPart = new Map<string, string[]>();
+    mappings.forEach((mapping) => {
+      const lines = mappingByPart.get(mapping.customPartId) ?? [];
+      lines.push(mapping.orderLineId);
+      mappingByPart.set(mapping.customPartId, lines);
+    });
     return NextResponse.json({
       ...detail,
       ...filesResult,
       files: filesResult.files.map((file) => ({
         ...file,
-        mappedOrderLineId: mappingByPart.get(String(file.customPartId)) || "",
+        mappedOrderLineIds: mappingByPart.get(String(file.customPartId)) || [],
       })),
     });
   } catch (error) {

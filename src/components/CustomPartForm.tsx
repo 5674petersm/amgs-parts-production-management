@@ -54,8 +54,8 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
         <dd>{draft.hasCustomColor ? draft.customColor : "No"}</dd>
       </div>
       <div>
-        <dt>Mapped order line</dt>
-        <dd>{draft.mappedOrderLineId || "None"}</dd>
+        <dt>Mapped order lines</dt>
+        <dd>{draft.mappedOrderLineIds.length ? draft.mappedOrderLineIds.join(", ") : "None"}</dd>
       </div>
       <div>
         <dt>Drawings</dt>
@@ -96,7 +96,7 @@ export function CustomPartForm({
   const [material, setMaterial] = useState(editPart?.material || "");
   const [hasCustomColor, setHasCustomColor] = useState(editPart?.hasCustomColor || false);
   const [customColor, setCustomColor] = useState(editPart?.customColor || "");
-  const [mappedOrderLineId, setMappedOrderLineId] = useState(editPart?.mappedOrderLineId || "");
+  const [mappedOrderLineIds, setMappedOrderLineIds] = useState<string[]>(editPart?.mappedOrderLineIds || []);
   const [orderLines, setOrderLines] = useState<CustomPartOrderLineChoice[]>([]);
   const [orderChoices, setOrderChoices] = useState<{ order: string; customer: string }[]>([]);
   const [lookupVersion, setLookupVersion] = useState(0);
@@ -267,7 +267,7 @@ export function CustomPartForm({
       hasCustomColor,
       customColor: customColor.trim(),
       drawingFiles,
-      mappedOrderLineId,
+      mappedOrderLineIds,
     });
     setReviewing(true);
   }
@@ -288,7 +288,7 @@ export function CustomPartForm({
     formData.append("material", draft.material);
     formData.append("hasCustomColor", String(draft.hasCustomColor));
     formData.append("customColor", draft.customColor);
-    formData.append("mappedOrderLineId", draft.mappedOrderLineId);
+    draft.mappedOrderLineIds.forEach((lineId) => formData.append("mappedOrderLineIds", lineId));
     for (const file of draft.drawingFiles) {
       formData.append("drawings", file);
     }
@@ -351,7 +351,7 @@ export function CustomPartForm({
     setHasCustomColor(false);
     setCustomColor("");
     setDrawingFiles([]);
-    setMappedOrderLineId("");
+    setMappedOrderLineIds([]);
     setError(null);
     setLookupVersion((value) => value + 1);
   }
@@ -435,6 +435,7 @@ export function CustomPartForm({
             list="custom-part-order-options"
             onChange={(e) => {
               const value = e.target.value;
+              if (value.trim() !== amgsOrderNumber.trim()) setMappedOrderLineIds([]);
               setAmgsOrderNumber(value);
               const selected = orderChoices.find((order) => order.order === value.trim());
               if (selected) setCustomerName(selected.customer);
@@ -518,17 +519,22 @@ export function CustomPartForm({
           </select>
         </label>
 
-        <label>
-          Related order line <span className="field-optional">(optional)</span>
-          <select value={mappedOrderLineId} onChange={(e) => setMappedOrderLineId(e.target.value)}>
-            <option value="">No line-item mapping</option>
-            {orderLines.map((line) => (
-              <option value={line.rowId} key={line.rowId}>
-                {line.lineNumber ? `Line ${line.lineNumber} · ` : ""}{line.partNumber}{line.description ? ` · ${line.description}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset className="custom-part-line-picker">
+          <legend>Related order lines <span className="field-optional">(optional)</span></legend>
+          <p className="hint field-hint">Select every line item that uses this supporting part.</p>
+          {orderLines.length ? orderLines.map((line) => (
+            <label key={line.rowId}>
+              <input
+                type="checkbox"
+                checked={mappedOrderLineIds.includes(line.rowId)}
+                onChange={(event) => setMappedOrderLineIds((current) => event.target.checked
+                  ? [...new Set([...current, line.rowId])]
+                  : current.filter((lineId) => lineId !== line.rowId))}
+              />
+              <span>{line.lineNumber ? `Line ${line.lineNumber} · ` : ""}<strong>{line.partNumber}</strong>{line.description ? ` · ${line.description}` : ""}</span>
+            </label>
+          )) : <p className="hint">Choose a valid order to load its line items.</p>}
+        </fieldset>
 
         <label className="checkbox-label">
           <input

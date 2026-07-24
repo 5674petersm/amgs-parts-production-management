@@ -184,10 +184,10 @@ export async function getCustomPartLineMappings(orderId = ""): Promise<CustomPar
   return data.mappings ?? [];
 }
 
-export async function setCustomPartLineMapping(input: {
+export async function setCustomPartLineMappings(input: {
   customPartId: number;
   orderNumber: string;
-  orderLineId: string;
+  orderLineIds: string[];
 }): Promise<void> {
   const response = await fetch(
     `${dashboardApiUrl()}/api/shop-floor-custom-part-mappings/${encodeURIComponent(String(input.customPartId))}`,
@@ -207,6 +207,16 @@ export async function validateCustomPartLineMapping(orderNumber: string, orderLi
   const detail = await getShopFloorOrderDetail(orderNumber);
   if (!detail.lines.some((line) => line.rowId === orderLineId)) {
     throw new Error("The selected order line does not belong to this order.");
+  }
+}
+
+export async function validateCustomPartLineMappings(orderNumber: string, orderLineIds: string[]): Promise<void> {
+  const uniqueIds = [...new Set(orderLineIds.map((value) => value.trim()).filter(Boolean))];
+  if (!uniqueIds.length) return;
+  const detail = await getShopFloorOrderDetail(orderNumber);
+  const validIds = new Set(detail.lines.map((line) => line.rowId));
+  if (uniqueIds.some((lineId) => !validIds.has(lineId))) {
+    throw new Error("One or more selected order lines do not belong to this order.");
   }
 }
 

@@ -8,6 +8,7 @@ import { PanelOrders } from "@/components/PanelOrders";
 import type { CurrentCustomPart } from "@/types/custom-part";
 
 type SortMode = "order" | "material";
+type ViewMode = "cards" | "list";
 
 export function CurrentCustomParts({ canManage = false }: { canManage?: boolean }) {
   const [parts, setParts] = useState<CurrentCustomPart[]>([]);
@@ -18,6 +19,7 @@ export function CurrentCustomParts({ canManage = false }: { canManage?: boolean 
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<"add" | CurrentCustomPart | null>(null);
   const [subtab, setSubtab] = useState<"parts" | "panels">("parts");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
   const loadParts = useCallback(() => {
     setLoading(true);
@@ -33,6 +35,15 @@ export function CurrentCustomParts({ canManage = false }: { canManage?: boolean 
   }, []);
 
   useEffect(() => loadParts(), [loadParts]);
+  useEffect(() => {
+    const savedView = window.localStorage.getItem("amgs-custom-parts-view");
+    if (savedView === "cards" || savedView === "list") setViewMode(savedView);
+  }, []);
+
+  function chooseView(nextView: ViewMode) {
+    setViewMode(nextView);
+    window.localStorage.setItem("amgs-custom-parts-view", nextView);
+  }
 
   const materials = useMemo(() => [...new Set(parts.map((part) => part.material))]
     .sort((a, b) => a.localeCompare(b)), [parts]);
@@ -104,17 +115,22 @@ export function CurrentCustomParts({ canManage = false }: { canManage?: boolean 
         <input className="floor-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order, part, or customer" />
         <label><span>Material</span><select value={material} onChange={(event) => setMaterial(event.target.value)}><option value="">All materials</option>{materials.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
         <label><span>Sort by</span><select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="order">Order #</option><option value="material">Material</option></select></label>
+        <div className="custom-part-view-toggle" role="group" aria-label="Custom part display">
+          <button className={viewMode === "cards" ? "active" : ""} type="button" aria-pressed={viewMode === "cards"} onClick={() => chooseView("cards")}>Cards</button>
+          <button className={viewMode === "list" ? "active" : ""} type="button" aria-pressed={viewMode === "list"} onClick={() => chooseView("list")}>List</button>
+        </div>
       </div>
       {loading && <p>Loading custom parts…</p>}
       {error && <p className="error">{error}</p>}
       {!loading && !error && (
-        <div className="custom-part-grid">
+        <div className={viewMode === "cards" ? "custom-part-grid" : "custom-part-list"}>
+          {viewMode === "list" && <div className="custom-part-list-heading" aria-hidden="true"><span>Part / Order</span><span>Description</span><span>Material</span><span>Qty</span><span>Customer</span><span>Files / Actions</span></div>}
           {visible.map((part) => (
             <article className="current-custom-part" key={part.customPartId}>
               <div className="current-custom-part-heading"><strong>{part.partNumber}</strong><span>Order #{part.orderNumber}</span></div>
               <p>{part.description}</p>
               <dl><div><dt>Material</dt><dd>{part.material}</dd></div><div><dt>Qty</dt><dd>{part.qtyNeeded}</dd></div><div><dt>Customer</dt><dd>{part.customerName}</dd></div><div><dt>Color</dt><dd>{part.color}</dd></div></dl>
-              {part.mappedOrderLineId && <p className="custom-part-mapping">Linked to an order line</p>}
+              {part.mappedOrderLineIds.length > 0 && <p className="custom-part-mapping">Linked to {part.mappedOrderLineIds.length} order line{part.mappedOrderLineIds.length === 1 ? "" : "s"}</p>}
               {part.files.length ? (
                 <ul className="direct-custom-files">
                   {part.files.map((file) => <li key={file.id}><CustomPartFilePreview file={file} /></li>)}
