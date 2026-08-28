@@ -8,7 +8,7 @@ export async function getPanelOrders(): Promise<PanelOrder[]> {
     const order = grouped.get(document.orderNumber) ?? {
       order: document.orderNumber,
       customer: document.customer || "Unknown customer",
-      dueDate: document.dueDate || "",
+      dueDate: document.dueDate?.slice(0, 10) || "",
       panels: [],
       missingCodeLines: 0,
     };

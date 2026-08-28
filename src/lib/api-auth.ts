@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 
 import { auth } from "@/auth";
 import {
@@ -37,6 +38,19 @@ export async function requireAuth(): Promise<AuthSuccess | AuthFailure> {
   }
 
   return { email, role };
+}
+
+export async function requireAuthOrShopFloor(request: Request): Promise<AuthSuccess | AuthFailure> {
+  const expectedToken = process.env.SHOP_FLOOR_API_TOKEN?.trim() || "";
+  const suppliedToken = request.headers.get("x-shop-floor-token") || "";
+  if (expectedToken && suppliedToken) {
+    const expected = Buffer.from(expectedToken);
+    const supplied = Buffer.from(suppliedToken);
+    if (expected.length === supplied.length && timingSafeEqual(expected, supplied)) {
+      return { email: "dashboard-integration", role: "admin" };
+    }
+  }
+  return requireAuth();
 }
 
 export async function requirePermission(

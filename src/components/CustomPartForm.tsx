@@ -10,7 +10,17 @@ import type {
   CustomPartOrderLineChoice,
   CustomPartOrderLookup,
   CustomPartUploadResponse,
+  PartLibraryItem,
 } from "@/types/custom-part";
+
+const STANDARD_COLORS = ["Black", "Yellow", "No Color"] as const;
+
+function existingStandardColor(part: CurrentCustomPart | null | undefined): string {
+  if (!part || part.hasCustomColor) return "";
+  return STANDARD_COLORS.includes(part.customColor as (typeof STANDARD_COLORS)[number])
+    ? part.customColor
+    : "No Color";
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
@@ -50,14 +60,22 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
         <dd>{draft.material}</dd>
       </div>
       <div>
-        <dt>Custom color</dt>
-        <dd>{draft.hasCustomColor ? draft.customColor : "No"}</dd>
+        <dt>Finish color</dt>
+        <dd>{draft.hasCustomColor ? `${draft.customColor} (custom)` : draft.standardColor}</dd>
       </div>
       <div>
         <dt>Mapped order lines</dt>
         <dd>{draft.mappedOrderLineIds.length ? draft.mappedOrderLineIds.join(", ") : "None"}</dd>
       </div>
-      <div>
+      {draft.saveToLibrary && <div>
+        <dt>Parts Library</dt>
+        <dd>Save this part for reuse</dd>
+      </div>}
+      {draft.sourceLibraryPartId && <div>
+        <dt>Library source</dt>
+        <dd>{draft.sourceLibraryPartName}</dd>
+      </div>}
+      {draft.drawingFiles.length > 0 && <div>
         <dt>Drawings</dt>
         <dd>
           <ul className="file-list compact">
@@ -69,24 +87,28 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
             ))}
           </ul>
         </dd>
-      </div>
+      </div>}
     </dl>
   );
 }
 
 export function CustomPartForm({
   initialOrderNumber = "",
+  initialCustomerName = "",
   editPart = null,
   onSaved,
+  initialOrderLineId = "",
 }: {
   initialOrderNumber?: string;
+  initialCustomerName?: string;
   editPart?: CurrentCustomPart | null;
   onSaved?: () => void;
+  initialOrderLineId?: string;
 } = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEditing = Boolean(editPart);
   const [amgsOrderNumber, setAmgsOrderNumber] = useState(editPart?.orderNumber || initialOrderNumber);
-  const [customerName, setCustomerName] = useState(editPart?.customerName || "");
+  const [customerName, setCustomerName] = useState(editPart?.customerName || initialCustomerName);
   const [nextPartNumber, setNextPartNumber] = useState(editPart?.partNumber || "");
   const [orderPartCount, setOrderPartCount] = useState(0);
   const [orderLookupLoading, setOrderLookupLoading] = useState(false);
@@ -95,8 +117,15 @@ export function CustomPartForm({
   const [qtyNeeded, setQtyNeeded] = useState(editPart ? String(editPart.qtyNeeded) : "");
   const [material, setMaterial] = useState(editPart?.material || "");
   const [hasCustomColor, setHasCustomColor] = useState(editPart?.hasCustomColor || false);
-  const [customColor, setCustomColor] = useState(editPart?.customColor || "");
-  const [mappedOrderLineIds, setMappedOrderLineIds] = useState<string[]>(editPart?.mappedOrderLineIds || []);
+  const [standardColor, setStandardColor] = useState(existingStandardColor(editPart));
+  const [customColor, setCustomColor] = useState(editPart?.hasCustomColor ? editPart.customColor : "");
+  const [mappedOrderLineIds, setMappedOrderLineIds] = useState<string[]>(editPart?.mappedOrderLineIds || (initialOrderLineId ? [initialOrderLineId] : []));
+  const [saveToLibrary, setSaveToLibrary] = useState(false);
+  const [sourceLibraryPart, setSourceLibraryPart] = useState<PartLibraryItem | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryParts, setLibraryParts] = useState<PartLibraryItem[]>([]);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryLoading, setLibraryLoading] = useState(false);
   const [orderLines, setOrderLines] = useState<CustomPartOrderLineChoice[]>([]);
   const [orderChoices, setOrderChoices] = useState<{ order: string; customer: string }[]>([]);
   const [lookupVersion, setLookupVersion] = useState(0);
@@ -116,6 +145,11 @@ export function CustomPartForm({
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const selected = orderChoices.find((order) => order.order === amgsOrderNumber.trim());
+    if (selected) setCustomerName((current) => current.trim() ? current : selected.customer);
+  }, [amgsOrderNumber, orderChoices]);
 
   useEffect(() => {
     const order = amgsOrderNumber.trim();
@@ -222,6 +256,41 @@ export function CustomPartForm({
     setDrawingFiles((current) => current.filter((_, i) => i !== index));
   }
 
+  async function openLibrary() {
+    setLibraryOpen(true);
+    if (libraryParts.length) return;
+    setLibraryLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/custom-parts/library", { cache: "no-store" });
+      const result = await response.json() as { parts?: PartLibraryItem[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "Unable to load the Parts Library.");
+      setLibraryParts(result.parts || []);
+    } catch (libraryError) {
+      setError(libraryError instanceof Error ? libraryError.message : "Unable to load the Parts Library.");
+      setLibraryOpen(false);
+    } finally {
+      setLibraryLoading(false);
+    }
+  }
+
+  function chooseLibraryPart(part: PartLibraryItem) {
+    setSourceLibraryPart(part);
+    setDescription(part.description);
+    setMaterial(part.material);
+    setHasCustomColor(part.hasCustomColor);
+    if (part.hasCustomColor) {
+      setCustomColor(part.color);
+      setStandardColor("");
+    } else {
+      setStandardColor(STANDARD_COLORS.includes(part.color as (typeof STANDARD_COLORS)[number]) ? part.color : "No Color");
+      setCustomColor("");
+    }
+    setDrawingFiles([]);
+    setSaveToLibrary(false);
+    setLibraryOpen(false);
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -241,6 +310,10 @@ export function CustomPartForm({
       setError("Enter a custom color or uncheck custom color.");
       return;
     }
+    if (!hasCustomColor && !STANDARD_COLORS.includes(standardColor as (typeof STANDARD_COLORS)[number])) {
+      setError("Select a standard color or No Color.");
+      return;
+    }
 
     if (!amgsOrderNumber.trim()) {
       setError("Enter an AMGS order number.");
@@ -252,7 +325,7 @@ export function CustomPartForm({
       return;
     }
 
-    if (!isEditing && drawingFiles.length === 0) {
+    if (!isEditing && !sourceLibraryPart && drawingFiles.length === 0) {
       setError("Add at least one drawing file.");
       return;
     }
@@ -265,9 +338,13 @@ export function CustomPartForm({
       qtyNeeded: qty,
       material,
       hasCustomColor,
+      standardColor,
       customColor: customColor.trim(),
       drawingFiles,
       mappedOrderLineIds,
+      saveToLibrary,
+      sourceLibraryPartId: sourceLibraryPart?.libraryPartId || null,
+      sourceLibraryPartName: sourceLibraryPart?.partName || "",
     });
     setReviewing(true);
   }
@@ -287,7 +364,10 @@ export function CustomPartForm({
     formData.append("qtyNeeded", String(draft.qtyNeeded));
     formData.append("material", draft.material);
     formData.append("hasCustomColor", String(draft.hasCustomColor));
+    formData.append("standardColor", draft.standardColor);
     formData.append("customColor", draft.customColor);
+    formData.append("saveToLibrary", String(draft.saveToLibrary));
+    if (draft.sourceLibraryPartId) formData.append("sourceLibraryPartId", String(draft.sourceLibraryPartId));
     draft.mappedOrderLineIds.forEach((lineId) => formData.append("mappedOrderLineIds", lineId));
     for (const file of draft.drawingFiles) {
       formData.append("drawings", file);
@@ -308,9 +388,13 @@ export function CustomPartForm({
         throw new Error(err.error ?? "Unable to upload to Google Drive.");
       }
 
+      if (isEditing) {
+        onSaved?.();
+        return;
+      }
       const result = data as CustomPartUploadResponse;
-      setDraft({ ...draft, partNumber: isEditing ? editPart!.partNumber : result.partNumber });
-      setFolderUrl(isEditing ? editPart!.folderUrl : result.folderUrl);
+      setDraft({ ...draft, partNumber: result.partNumber });
+      setFolderUrl(result.folderUrl);
       setSaved(true);
       setReviewing(false);
     } catch (uploadError) {
@@ -349,9 +433,12 @@ export function CustomPartForm({
     setQtyNeeded("");
     setMaterial("");
     setHasCustomColor(false);
+    setStandardColor("");
     setCustomColor("");
     setDrawingFiles([]);
     setMappedOrderLineIds([]);
+    setSaveToLibrary(false);
+    setSourceLibraryPart(null);
     setError(null);
     setLookupVersion((value) => value + 1);
   }
@@ -426,6 +513,32 @@ export function CustomPartForm({
       </p>
 
       <form className="card form-card" onSubmit={handleSubmit}>
+        {!isEditing && (
+          <div className="custom-part-library-source">
+            <div>
+              <strong>{sourceLibraryPart ? `Using ${sourceLibraryPart.partName}` : "Reuse a prepared part"}</strong>
+              <span>{sourceLibraryPart ? "Details and drawings will be copied from the Parts Library." : "Pull saved details and drawings into this custom part."}</span>
+            </div>
+            <div className="action-row">
+              {sourceLibraryPart && <button className="secondary-button" type="button" onClick={() => setSourceLibraryPart(null)}>Clear</button>}
+              <button className="secondary-button" type="button" onClick={() => void openLibrary()} disabled={libraryLoading}>{libraryLoading ? "Loading…" : "Pull from Parts Library"}</button>
+            </div>
+          </div>
+        )}
+
+        {libraryOpen && (
+          <div className="custom-part-library-picker" role="dialog" aria-label="Choose a library part">
+            <div className="copy-order-heading"><div><h2>Choose a library part</h2><p>Select a prepared part to copy its specifications and drawings.</p></div><button className="secondary-button" type="button" onClick={() => setLibraryOpen(false)}>Close</button></div>
+            <input type="search" value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="Search name, description, material, or color" autoFocus />
+            <div className="custom-part-library-picker-list">
+              {libraryParts.filter((part) => {
+                const query = librarySearch.trim().toLowerCase();
+                return !query || [part.partName, part.description, part.material, part.color].some((value) => value.toLowerCase().includes(query));
+              }).map((part) => <button type="button" key={part.libraryPartId} onClick={() => chooseLibraryPart(part)}><strong>{part.partName}</strong><span>{part.description}</span><small>{part.material} · {part.color} · {part.files.filter((file) => file.name !== "part-details.txt").length} files</small></button>)}
+            </div>
+          </div>
+        )}
+
         <label>
           AMGS order number
           <input
@@ -542,9 +655,6 @@ export function CustomPartForm({
             checked={hasCustomColor}
             onChange={(e) => {
               setHasCustomColor(e.target.checked);
-              if (!e.target.checked) {
-                setCustomColor("");
-              }
             }}
           />
           Custom color
@@ -564,19 +674,28 @@ export function CustomPartForm({
           </label>
         )}
 
+        {!hasCustomColor && (
+          <label>
+            Standard color
+            <select required value={standardColor} onChange={(e) => setStandardColor(e.target.value)}>
+              <option value="">Select standard color</option>
+              {STANDARD_COLORS.map((color) => <option value={color} key={color}>{color}</option>)}
+            </select>
+          </label>
+        )}
+
         <div className="field-block">
           <span className="field-label">Drawing files</span>
           <p className="hint field-hint">
-            PDF, images, CAD, or other drawing formats. {isEditing ? "New files are optional and will be added to the existing folder." : "Add one or more files."} Max 50 MB each.
+            {sourceLibraryPart ? `Using ${sourceLibraryPart.files.filter((file) => file.name !== "part-details.txt").length} saved library file(s).` : <>All file types are accepted. {isEditing ? "Upload corrected or additional files here. Existing Drive files are left unchanged." : "Add one or more files."} Max 50 MB each.</>}
           </p>
-          <input
+          {!sourceLibraryPart && <input
             ref={fileInputRef}
             type="file"
             multiple
             className="file-input"
-            accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.dwg,.dxf,.step,.stp,.iges,.igs,.svg"
             onChange={(e) => addFiles(e.target.files)}
-          />
+          />}
           {drawingFiles.length > 0 && (
             <ul className="file-list">
               {drawingFiles.map((file, index) => (
@@ -597,6 +716,20 @@ export function CustomPartForm({
             </ul>
           )}
         </div>
+
+        {!isEditing && !sourceLibraryPart && (
+          <label className="checkbox-label library-save-checkbox">
+            <input
+              type="checkbox"
+              checked={saveToLibrary}
+              onChange={(event) => setSaveToLibrary(event.target.checked)}
+            />
+            <span>
+              Save this part to the Parts Library
+              <small>Keep a reusable copy of its details and drawings for future orders.</small>
+            </span>
+          </label>
+        )}
 
         {error && <p className="error">{error}</p>}
 

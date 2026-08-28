@@ -66,6 +66,9 @@ export async function POST(request: Request) {
           : await createApprovedPanelDrawingPdf(document.drawingSvg));
       }
     }
+    if (!pdfs.length) {
+      return NextResponse.json({ error: isCutlist ? "None of the selected panels require a cutlist." : "No panel drawings were found." }, { status: 400 });
+    }
     const pdf = await mergePdfs(pdfs);
     const fileName = isCutlist ? "selected-panels-consolidated-cutlist.pdf" : "selected-panels-approved-drawings.pdf";
     return new Response(new Uint8Array(pdf), { headers: {

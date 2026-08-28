@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CustomPartFilePreview } from "@/components/CustomPartFilePreview";
 import { PanelLineDocuments } from "@/components/PanelLineDocuments";
@@ -81,7 +81,13 @@ function CustomFileGroup({ group, compact = false }: { group: ShopFloorOrderFile
   return (
     <div className={`custom-file-group${compact ? " mapped-custom-file-group" : ""}`}>
       <div className="custom-file-heading">
-        <div><strong>{group.partNumber}</strong><span>{group.description}</span></div>
+        <div>
+          <div className="custom-file-title">
+            <strong>{group.partNumber}</strong>
+            {group.completedAt && <span className="custom-part-complete-tag">Complete</span>}
+          </div>
+          <span>{group.description}</span>
+        </div>
         <a href={group.folderUrl} target="_blank" rel="noreferrer">Drive</a>
       </div>
       {group.files.length ? <ul>{group.files.map((file) => (
@@ -96,17 +102,20 @@ function FloorOrderCard({
   today,
   group,
   canCorrectCompletion,
+  refreshToken,
 }: {
   order: ShopFloorOrder;
   today: string;
   group: OrderGroupKey;
   canCorrectCompletion: boolean;
+  refreshToken: number;
 }) {
   const [detail, setDetail] = useState<ShopFloorOrderDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [savingLine, setSavingLine] = useState("");
   const [expandedLine, setExpandedLine] = useState("");
+  const previousRefreshToken = useRef(refreshToken);
 
   const loadDetail = useCallback(async () => {
     setDetailLoading(true);
@@ -126,6 +135,12 @@ function FloorOrderCard({
       setDetailLoading(false);
     }
   }, [order.order]);
+
+  useEffect(() => {
+    if (previousRefreshToken.current === refreshToken) return;
+    previousRefreshToken.current = refreshToken;
+    if (detail) void loadDetail();
+  }, [detail, loadDetail, refreshToken]);
 
   async function setLineComplete(lineId: string, checked: boolean) {
     setSavingLine(lineId);
@@ -169,6 +184,14 @@ function FloorOrderCard({
         <div className="floor-order-badges">
           {order.isFullyStandard && (
             <span className="standard-badge">STANDARD · PRIORITY</span>
+          )}
+          {order.isCustomerApproved && (
+            <span
+              className="approval-badge"
+              title={order.customerApprovedDate ? `Approved ${formatDueDate(order.customerApprovedDate)}` : "Approved by customer"}
+            >
+              Customer Approved
+            </span>
           )}
           <span className={order.isReleased ? "release-badge released" : "release-badge pending"}>
             {order.isReleased ? "Released" : "Engineering"}
@@ -219,7 +242,7 @@ function FloorOrderCard({
                       </span>
                       <span className="floor-order-line-qty">Qty {line.orderedQty}</span>
                       {mappedParts.length > 0 && <span className="mapped-part-count">{mappedParts.length} custom part{mappedParts.length === 1 ? "" : "s"} {lineIsExpanded ? "▲" : "▼"}</span>}
-                      {hasPanelDocuments && <span className="panel-document-count">{panelDocuments.length * 2} approved panel documents {lineIsExpanded ? "▲" : "▼"}</span>}
+                      {hasPanelDocuments && <span className="panel-document-count">{panelDocuments.reduce((count, document) => count + 1 + (document.cutlistMode === "none" ? 0 : 1), 0)} approved panel documents {lineIsExpanded ? "▲" : "▼"}</span>}
                     </button>
                     <span className="floor-order-line-state">
                       {savingLine === line.rowId ? "Saving…" : line.completed ? canCorrectCompletion ? "Complete · uncheck to correct" : "Complete" : "Use checkbox to mark complete"}
@@ -260,11 +283,15 @@ export function ProductionOrderLog({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
 
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const response = await fetch("/api/shop-floor-orders", { cache: "no-store" });
+      const response = await fetch(
+        `/api/shop-floor-orders${forceRefresh ? "?refresh=1" : ""}`,
+        { cache: "no-store" },
+      );
       const result = (await response.json()) as ShopFloorOrdersResult & { error?: string };
       if (!response.ok) {
         throw new Error(result.error || "Unable to load orders.");
@@ -277,6 +304,11 @@ export function ProductionOrderLog({
       setLoading(false);
     }
   }, []);
+
+  const refreshPageData = useCallback(async () => {
+    setRefreshToken((value) => value + 1);
+    await loadOrders(true);
+  }, [loadOrders]);
 
   useEffect(() => {
     void loadOrders();
@@ -323,10 +355,11 @@ export function ProductionOrderLog({
         <button
           type="button"
           className="order-refresh-button"
-          onClick={() => void loadOrders()}
+          onClick={() => void refreshPageData()}
           disabled={loading}
+          aria-label="Refresh production orders and custom parts"
         >
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? "Refreshing…" : "↻ Refresh"}
         </button>
       </div>
 
@@ -358,6 +391,7 @@ export function ProductionOrderLog({
                   today={data.today}
                   group={key}
                   canCorrectCompletion={canCorrectCompletion}
+                  refreshToken={refreshToken}
                 />
               ))}
             </div>

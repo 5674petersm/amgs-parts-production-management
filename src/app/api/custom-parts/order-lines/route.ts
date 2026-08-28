@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { requirePermission } from "@/lib/api-auth";
+import { requireAuth } from "@/lib/api-auth";
 import { getShopFloorOrderDetail } from "@/lib/shop-floor-orders";
 
 export async function GET(request: Request) {
-  const authResult = await requirePermission("customParts");
+  const authResult = await requireAuth();
   if ("response" in authResult) return authResult.response;
   const order = new URL(request.url).searchParams.get("order")?.trim() || "";
   if (!order) return NextResponse.json({ error: "Order number is required." }, { status: 400 });

@@ -3,10 +3,20 @@
 import DxfParser from "dxf-parser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TrackballControls } from "three/examples/jsm/controls/TrackballControls.js";
 
 type PreviewFile = { id: string; name: string; mimeType: string; url: string };
 type Point2 = { x: number; y: number };
+type DxfCircle = {
+  center: Point2;
+  radius: number;
+  startAngle: number | null;
+  endAngle: number | null;
+};
+type MeasurementResult = {
+  distance: number;
+  delta: THREE.Vector3;
+};
 
 let occtPromise: Promise<any> | null = null;
 
@@ -32,6 +42,175 @@ function fileExtension(name: string) {
   return name.toLowerCase().split(".").pop() || "";
 }
 
+function circularEdgeCenters(geometry: THREE.BufferGeometry): Map<number, THREE.Vector3> {
+  const position = geometry.getAttribute("position");
+  const circlesBySegment = new Map<number, THREE.Vector3>();
+  if (!position || position.count < 16) return circlesBySegment;
+
+  geometry.computeBoundingBox();
+  const diagonal = geometry.boundingBox?.getSize(new THREE.Vector3()).length() || 1;
+  const tolerance = Math.max(diagonal * 1e-5, 1e-6);
+  const pointKey = (point: THREE.Vector3) => [
+    Math.round(point.x / tolerance),
+    Math.round(point.y / tolerance),
+    Math.round(point.z / tolerance),
+  ].join(":");
+  const segments: { start: THREE.Vector3; end: THREE.Vector3; startKey: string; endKey: string }[] = [];
+  const adjacency = new Map<string, number[]>();
+  const pointsByKey = new Map<string, THREE.Vector3>();
+
+  for (let index = 0; index + 1 < position.count; index += 2) {
+    const start = new THREE.Vector3().fromBufferAttribute(position, index);
+    const end = new THREE.Vector3().fromBufferAttribute(position, index + 1);
+    const startKey = pointKey(start);
+    const endKey = pointKey(end);
+    const segmentIndex = segments.length;
+    segments.push({ start, end, startKey, endKey });
+    pointsByKey.set(startKey, start);
+    pointsByKey.set(endKey, end);
+    adjacency.set(startKey, [...(adjacency.get(startKey) || []), segmentIndex]);
+    adjacency.set(endKey, [...(adjacency.get(endKey) || []), segmentIndex]);
+  }
+
+  const unvisited = new Set(segments.map((_, index) => index));
+  while (unvisited.size) {
+    const first = unvisited.values().next().value as number;
+    const component: number[] = [];
+    const queue = [first];
+    unvisited.delete(first);
+    while (queue.length) {
+      const segmentIndex = queue.pop()!;
+      component.push(segmentIndex);
+      const segment = segments[segmentIndex];
+      for (const key of [segment.startKey, segment.endKey]) {
+        for (const neighbor of adjacency.get(key) || []) {
+          if (unvisited.delete(neighbor)) queue.push(neighbor);
+        }
+      }
+    }
+
+    const componentKeys = new Set(component.flatMap((index) => [
+      segments[index].startKey,
+      segments[index].endKey,
+    ]));
+    if (component.length < 8 || [...componentKeys].some((key) => adjacency.get(key)?.length !== 2)) continue;
+
+    const ordered: THREE.Vector3[] = [];
+    const orderedSegments: number[] = [];
+    const used = new Set<number>();
+    let currentKey = segments[component[0]].startKey;
+    for (let count = 0; count < component.length; count++) {
+      const nextSegment = (adjacency.get(currentKey) || []).find((index) => component.includes(index) && !used.has(index));
+      if (nextSegment === undefined) break;
+      used.add(nextSegment);
+      ordered.push(pointsByKey.get(currentKey)!.clone());
+      orderedSegments.push(nextSegment);
+      const segment = segments[nextSegment];
+      currentKey = segment.startKey === currentKey ? segment.endKey : segment.startKey;
+    }
+    if (ordered.length !== component.length) continue;
+
+    const center = ordered.reduce((sum, point) => sum.add(point), new THREE.Vector3())
+      .multiplyScalar(1 / ordered.length);
+    const normal = new THREE.Vector3();
+    for (let index = 0; index < ordered.length; index++) {
+      const current = ordered[index].clone().sub(center);
+      const next = ordered[(index + 1) % ordered.length].clone().sub(center);
+      normal.add(current.cross(next));
+    }
+    if (normal.lengthSq() < tolerance * tolerance) continue;
+    normal.normalize();
+    const radii = ordered.map((point) => {
+      const offset = point.clone().sub(center);
+      return offset.addScaledVector(normal, -offset.dot(normal)).length();
+    });
+    const radius = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+    if (radius <= tolerance) continue;
+    const radialError = Math.max(...radii.map((value) => Math.abs(value - radius))) / radius;
+    const planarError = Math.max(...ordered.map((point) => Math.abs(point.clone().sub(center).dot(normal)))) / radius;
+    const perimeter = ordered.reduce((sum, point, index) =>
+      sum + point.distanceTo(ordered[(index + 1) % ordered.length]), 0);
+    const circumferenceRatio = perimeter / (Math.PI * 2 * radius);
+    const isCompleteCircle = radialError <= 0.035
+      && planarError <= 0.02
+      && circumferenceRatio >= 0.9
+      && circumferenceRatio <= 1.05;
+    if (isCompleteCircle) {
+      component.forEach((segmentIndex) => circlesBySegment.set(segmentIndex * 2, center.clone()));
+      continue;
+    }
+
+    const arcJoints = ordered.map((point, index) => {
+      const previous = ordered[(index - 1 + ordered.length) % ordered.length];
+      const next = ordered[(index + 1) % ordered.length];
+      const incoming = point.clone().sub(previous);
+      const outgoing = next.clone().sub(point);
+      const turn = incoming.angleTo(outgoing);
+      if (!Number.isFinite(turn) || turn < THREE.MathUtils.degToRad(0.75)) return null;
+      const a = point.clone().sub(previous);
+      const b = next.clone().sub(previous);
+      const cross = new THREE.Vector3().crossVectors(a, b);
+      const denominator = 2 * cross.lengthSq();
+      if (denominator <= tolerance * tolerance) return null;
+      const arcCenter = previous.clone()
+        .add(new THREE.Vector3().crossVectors(b, cross).multiplyScalar(a.lengthSq()))
+        .add(new THREE.Vector3().crossVectors(cross, a).multiplyScalar(b.lengthSq()))
+        .addScaledVector(previous, -1)
+        .multiplyScalar(1 / denominator)
+        .add(previous);
+      const arcRadius = arcCenter.distanceTo(point);
+      const expandedBounds = geometry.boundingBox!.clone().expandByScalar(diagonal * 0.03);
+      return arcRadius > tolerance
+        && arcRadius <= diagonal
+        && expandedBounds.containsPoint(arcCenter)
+        ? { index, center: arcCenter, radius: arcRadius, turn }
+        : null;
+    });
+
+    const firstStraight = arcJoints.findIndex((joint) => joint === null);
+    const orderedJoints = firstStraight >= 0
+      ? [...arcJoints.slice(firstStraight + 1), ...arcJoints.slice(0, firstStraight + 1)]
+      : arcJoints;
+    let run: NonNullable<(typeof arcJoints)[number]>[] = [];
+    const saveRun = () => {
+      if (run.length < 2) {
+        run = [];
+        return;
+      }
+      const accumulatedTurn = run.reduce((sum, joint) => sum + joint.turn, 0);
+      if (accumulatedTurn < THREE.MathUtils.degToRad(30)) {
+        run = [];
+        return;
+      }
+      const runCenter = run.reduce((sum, joint) => sum.add(joint.center), new THREE.Vector3())
+        .multiplyScalar(1 / run.length);
+      run.forEach((joint) => {
+        const previousSegment = orderedSegments[(joint.index - 1 + orderedSegments.length) % orderedSegments.length];
+        const nextSegment = orderedSegments[joint.index];
+        circlesBySegment.set(previousSegment * 2, runCenter.clone());
+        circlesBySegment.set(nextSegment * 2, runCenter.clone());
+      });
+      run = [];
+    };
+    for (const joint of orderedJoints) {
+      if (!joint) {
+        saveRun();
+        continue;
+      }
+      const reference = run[0];
+      const matchesRun = !reference
+        || (
+          Math.abs(joint.radius - reference.radius) <= reference.radius * 0.04
+          && joint.center.distanceTo(reference.center) <= reference.radius * 0.04
+        );
+      if (!matchesRun) saveRun();
+      run.push(joint);
+    }
+    saveRun();
+  }
+  return circlesBySegment;
+}
+
 function arcPoints(center: Point2, radius: number, start: number, end: number) {
   let finish = end;
   while (finish <= start) finish += Math.PI * 2;
@@ -40,6 +219,29 @@ function arcPoints(center: Point2, radius: number, start: number, end: number) {
     const angle = start + ((finish - start) * index / count);
     return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
   });
+}
+
+function bulgeArc(start: Point2, end: Point2, bulge: number): { circle: DxfCircle; points: Point2[] } | null {
+  if (!Number.isFinite(bulge) || Math.abs(bulge) < 1e-8) return null;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const chord = Math.hypot(dx, dy);
+  if (!chord) return null;
+  const radius = chord * (1 + bulge * bulge) / (4 * Math.abs(bulge));
+  const offset = chord * (1 - bulge * bulge) / (4 * bulge);
+  const center = {
+    x: (start.x + end.x) / 2 - (dy / chord) * offset,
+    y: (start.y + end.y) / 2 + (dx / chord) * offset,
+  };
+  const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
+  const endAngle = Math.atan2(end.y - center.y, end.x - center.x);
+  const circle = bulge > 0
+    ? { center, radius, startAngle, endAngle }
+    : { center, radius, startAngle: endAngle, endAngle: startAngle };
+  const points = bulge > 0
+    ? arcPoints(center, radius, startAngle, endAngle)
+    : arcPoints(center, radius, endAngle, startAngle).reverse();
+  return { circle, points };
 }
 
 function entityPolylines(entity: any): Point2[][] {
@@ -55,9 +257,19 @@ function entityPolylines(entity: any): Point2[][] {
     return points.length > 1 ? [points] : [];
   }
   if (type === "LWPOLYLINE" || type === "POLYLINE") {
-    const points = (entity.vertices || []).map(point).filter(Boolean) as Point2[];
-    if ((entity.closed || entity.shape) && points.length) points.push(points[0]);
-    return points.length > 1 ? [points] : [];
+    const vertices = entity.vertices || [];
+    const points = vertices.map(point).filter(Boolean) as Point2[];
+    if (points.length < 2) return [];
+    const expanded: Point2[] = [points[0]];
+    const segmentCount = (entity.closed || entity.shape) ? points.length : points.length - 1;
+    for (let index = 0; index < segmentCount; index++) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+      const arc = bulgeArc(start, end, Number(vertices[index]?.bulge || 0));
+      if (arc) expanded.push(...arc.points.slice(1));
+      else expanded.push(end);
+    }
+    return [expanded];
   }
   if (type === "CIRCLE") {
     const center = point(entity.center);
@@ -74,14 +286,81 @@ function entityPolylines(entity: any): Point2[][] {
   return [];
 }
 
+function entityCircles(entity: any): DxfCircle[] {
+  const type = String(entity?.type || "").toUpperCase();
+  if (type === "CIRCLE" || type === "ARC") {
+    const x = Number(entity.center?.x ?? entity.center?.[0]);
+    const y = Number(entity.center?.y ?? entity.center?.[1]);
+    const radius = Number(entity.radius);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(radius) && radius > 0
+      ? [{
+      center: { x, y },
+      radius,
+      startAngle: type === "ARC" ? Number(entity.startAngle || 0) : null,
+      endAngle: type === "ARC" ? Number(entity.endAngle || 0) : null,
+      }]
+      : [];
+  }
+  if (type === "LWPOLYLINE" || type === "POLYLINE") {
+    const vertices = entity.vertices || [];
+    const point = (value: any): Point2 | null => {
+      const x = Number(value?.x ?? value?.[0]);
+      const y = Number(value?.y ?? value?.[1]);
+      return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    };
+    const points = vertices.map(point);
+    const segmentCount = (entity.closed || entity.shape) ? points.length : points.length - 1;
+    const circles: DxfCircle[] = [];
+    for (let index = 0; index < segmentCount; index++) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+      if (!start || !end) continue;
+      const arc = bulgeArc(start, end, Number(vertices[index]?.bulge || 0));
+      if (arc) circles.push(arc.circle);
+    }
+    return circles;
+  }
+  return [];
+}
+
+function angleFallsOnDxfArc(angle: number, circle: DxfCircle): boolean {
+  if (circle.startAngle === null || circle.endAngle === null) return true;
+  const fullTurn = Math.PI * 2;
+  const normalize = (value: number) => ((value % fullTurn) + fullTurn) % fullTurn;
+  const start = normalize(circle.startAngle);
+  let end = normalize(circle.endAngle);
+  const target = normalize(angle);
+  if (end <= start) end += fullTurn;
+  const adjustedTarget = target < start ? target + fullTurn : target;
+  return adjustedTarget >= start && adjustedTarget <= end;
+}
+
+function nearestPointOnSegment(point: Point2, start: Point2, end: Point2): Point2 {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return start;
+  const amount = Math.max(0, Math.min(1, (
+    (point.x - start.x) * dx + (point.y - start.y) * dy
+  ) / lengthSquared));
+  return { x: start.x + dx * amount, y: start.y + dy * amount };
+}
+
 function DxfPreview({ url }: { url: string }) {
+  const svgRef = useRef<SVGSVGElement>(null);
   const [lines, setLines] = useState<Point2[][]>([]);
+  const [circles, setCircles] = useState<DxfCircle[]>([]);
   const [error, setError] = useState("");
+  const [measureEnabled, setMeasureEnabled] = useState(false);
+  const [selectedPoints, setSelectedPoints] = useState<Point2[]>([]);
+  const [lastSnap, setLastSnap] = useState("");
   useEffect(() => {
     fetch(url).then(async (response) => {
       if (!response.ok) throw new Error("Could not load DXF file.");
       const parsed = new DxfParser().parseSync(await response.text());
-      setLines((parsed?.entities || []).flatMap(entityPolylines));
+      const entities = parsed?.entities || [];
+      setLines(entities.flatMap(entityPolylines));
+      setCircles(entities.flatMap(entityCircles));
     }).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : "Could not preview DXF."));
   }, [url]);
   const bounds = useMemo(() => {
@@ -96,10 +375,138 @@ function DxfPreview({ url }: { url: string }) {
   }, [lines]);
   if (error) return <p className="file-preview-error">{error}</p>;
   if (!lines.length) return <p className="file-preview-loading">Loading DXF drawing…</p>;
+
+  const clearMeasurement = () => {
+    setSelectedPoints([]);
+    setLastSnap("");
+  };
+  const selectMeasurementPoint = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!measureEnabled) return;
+    const svg = svgRef.current;
+    const screenMatrix = svg?.getScreenCTM();
+    if (!svg || !screenMatrix) return;
+    const inverse = screenMatrix.inverse();
+    const modelPoint = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
+    const nearbyPoint = new DOMPoint(event.clientX + 12, event.clientY).matrixTransform(inverse);
+    const pointer = { x: modelPoint.x, y: -modelPoint.y };
+    const snapDistance = Math.hypot(nearbyPoint.x - modelPoint.x, nearbyPoint.y - modelPoint.y);
+
+    let snapped: Point2 | null = null;
+    let nearestDistance = snapDistance;
+    let snapLabel = "";
+    for (const circle of circles) {
+      const distanceFromCenter = Math.hypot(pointer.x - circle.center.x, pointer.y - circle.center.y);
+      const distanceFromEdge = Math.abs(distanceFromCenter - circle.radius);
+      const angle = Math.atan2(pointer.y - circle.center.y, pointer.x - circle.center.x);
+      if (distanceFromEdge <= nearestDistance && angleFallsOnDxfArc(angle, circle)) {
+        nearestDistance = distanceFromEdge;
+        snapped = circle.center;
+        snapLabel = circle.startAngle === null ? "Circle center" : "Radius center";
+      }
+    }
+    if (!snapped) {
+      for (const line of lines) {
+        for (let index = 1; index < line.length; index++) {
+          const candidate = nearestPointOnSegment(pointer, line[index - 1], line[index]);
+          const distance = Math.hypot(pointer.x - candidate.x, pointer.y - candidate.y);
+          if (distance <= nearestDistance) {
+            nearestDistance = distance;
+            snapped = candidate;
+            snapLabel = "Edge";
+          }
+        }
+      }
+    }
+    if (!snapped) {
+      setLastSnap("Select closer to drawing geometry");
+      return;
+    }
+    const next = selectedPoints.length === 2 ? [snapped] : [...selectedPoints, snapped];
+    setSelectedPoints(next);
+    setLastSnap(snapLabel);
+  };
+  const measurement = selectedPoints.length === 2 ? {
+    x: Math.abs(selectedPoints[1].x - selectedPoints[0].x),
+    y: Math.abs(selectedPoints[1].y - selectedPoints[0].y),
+    distance: Math.hypot(
+      selectedPoints[1].x - selectedPoints[0].x,
+      selectedPoints[1].y - selectedPoints[0].y,
+    ),
+  } : null;
+  const formatValue = (value: number) => {
+    const rounded = Math.round(value * 100) / 100;
+    return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2).replace(/0$/, "");
+  };
+  const markerRadius = Math.max(bounds.width, bounds.height) * 0.004;
   return (
-    <svg className="dxf-preview" viewBox={`${bounds.minX} ${-(bounds.minY + bounds.height)} ${bounds.width} ${bounds.height}`} aria-label="DXF drawing preview">
-      {lines.map((line, index) => <polyline key={index} points={line.map((point) => `${point.x},${-point.y}`).join(" ")} />)}
-    </svg>
+    <div className="dxf-measure-preview">
+      <svg
+        ref={svgRef}
+        className="dxf-preview"
+        viewBox={`${bounds.minX} ${-(bounds.minY + bounds.height)} ${bounds.width} ${bounds.height}`}
+        aria-label="DXF drawing preview"
+        onPointerUp={selectMeasurementPoint}
+      >
+        {lines.map((line, index) => <polyline key={index} points={line.map((point) => `${point.x},${-point.y}`).join(" ")} />)}
+        {selectedPoints.length === 2 && (
+          <>
+            <line
+              className="dxf-measurement-line"
+              x1={selectedPoints[0].x}
+              y1={-selectedPoints[0].y}
+              x2={selectedPoints[1].x}
+              y2={-selectedPoints[1].y}
+            />
+            <line
+              className="dxf-delta-line axis-x"
+              x1={selectedPoints[0].x}
+              y1={-selectedPoints[0].y}
+              x2={selectedPoints[1].x}
+              y2={-selectedPoints[0].y}
+            />
+            <line
+              className="dxf-delta-line axis-y"
+              x1={selectedPoints[1].x}
+              y1={-selectedPoints[0].y}
+              x2={selectedPoints[1].x}
+              y2={-selectedPoints[1].y}
+            />
+          </>
+        )}
+        {selectedPoints.map((point, index) => (
+          <circle className="dxf-measurement-point" key={index} cx={point.x} cy={-point.y} r={markerRadius} />
+        ))}
+      </svg>
+      <div className="step-preview-toolbar dxf-measure-toolbar">
+        <button
+          type="button"
+          className={measureEnabled ? "active" : ""}
+          aria-pressed={measureEnabled}
+          onClick={() => setMeasureEnabled((enabled) => !enabled)}
+        >
+          {measureEnabled ? "Stop measuring" : "Measure"}
+        </button>
+        {selectedPoints.length > 0 && <button type="button" onClick={clearMeasurement}>Clear</button>}
+        {measurement ? (
+          <span className="step-measurement-result">
+            <strong>Axis offsets</strong>
+            <span className="step-axis-measurements">
+              <b className="axis-x">X&nbsp; {formatValue(measurement.x)}</b>
+              <b className="axis-y">Y&nbsp; {formatValue(measurement.y)}</b>
+            </span>
+            <small>2D diagonal: {formatValue(measurement.distance)} drawing units</small>
+          </span>
+        ) : (
+          <span>
+            {measureEnabled
+              ? selectedPoints.length === 1
+                ? `${lastSnap} selected · select the second point`
+                : lastSnap || "Select two edges or circles"
+              : "Measurement values use the DXF drawing units"}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -176,16 +583,34 @@ function PdfPreview({ url }: { url: string }) {
 
 function StepPreview({ url }: { url: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const measureEnabledRef = useRef(false);
+  const clearMeasurementRef = useRef<() => void>(() => {});
   const [error, setError] = useState("");
+  const [dimensions, setDimensions] = useState<THREE.Vector3 | null>(null);
+  const [measureEnabled, setMeasureEnabled] = useState(false);
+  const [measurementPoints, setMeasurementPoints] = useState(0);
+  const [measurement, setMeasurement] = useState<MeasurementResult | null>(null);
+  const [lastSnap, setLastSnap] = useState("");
+
+  useEffect(() => {
+    measureEnabledRef.current = measureEnabled;
+  }, [measureEnabled]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    setError("");
+    setDimensions(null);
+    setMeasurementPoints(0);
+    setMeasurement(null);
+    setLastSnap("");
     let disposed = false;
     let frame = 0;
     let resizeObserver: ResizeObserver | null = null;
     let renderer: THREE.WebGLRenderer | null = null;
-    let controls: OrbitControls | null = null;
+    let controls: TrackballControls | null = null;
     let scene: THREE.Scene | null = null;
+    let removeMeasurementListeners = () => {};
     Promise.all([fetch(url), loadOcct()]).then(async ([response, occt]) => {
       if (!response.ok) throw new Error("Could not load STEP file.");
       const result = occt.ReadStepFile(new Uint8Array(await response.arrayBuffer()), {
@@ -201,11 +626,19 @@ function StepPreview({ url }: { url: string }) {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       container.replaceChildren(renderer.domElement);
       const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-      const light = new THREE.DirectionalLight(0xffffff, 1.8); light.position.set(100, 140, 100); scene.add(light);
+      controls = new TrackballControls(camera, renderer.domElement);
+      controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+      controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+      controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+      controls.rotateSpeed = 1.6;
+      controls.zoomSpeed = 0.35;
+      controls.panSpeed = 0.45;
+      controls.staticMoving = false;
+      controls.dynamicDampingFactor = 0.15;
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x8795a1, 1.4));
+      const light = new THREE.DirectionalLight(0xffffff, 2); light.position.set(100, 140, 100); scene.add(light);
       const group = new THREE.Group();
+      const edgeObjects: THREE.LineSegments[] = [];
       for (const mesh of result.meshes || []) {
         const position = (mesh.attributes?.position?.array || []).flat(Infinity);
         if (!position.length) continue;
@@ -215,31 +648,225 @@ function StepPreview({ url }: { url: string }) {
         if (normals.length) geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3)); else geometry.computeVertexNormals();
         const indices = (mesh.index?.array || []).flat(Infinity);
         if (indices.length) geometry.setIndex(indices);
-        group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x8299aa, roughness: 0.55, side: THREE.DoubleSide })));
+        const renderedMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+          color: 0xaabac5,
+          roughness: 0.65,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
+        }));
+        const edgeGeometry = new THREE.EdgesGeometry(geometry, 18);
+        const renderedEdges = new THREE.LineSegments(
+          edgeGeometry,
+          new THREE.LineBasicMaterial({ color: 0x142a35 }),
+        );
+        renderedEdges.userData.circleCenters = circularEdgeCenters(edgeGeometry);
+        renderedMesh.add(renderedEdges);
+        edgeObjects.push(renderedEdges);
+        group.add(renderedMesh);
       }
       if (!group.children.length) throw new Error("STEP file has no renderable geometry.");
       scene.add(group);
       const box = new THREE.Box3().setFromObject(group);
       const center = box.getCenter(new THREE.Vector3());
-      const size = Math.max(...box.getSize(new THREE.Vector3()).toArray(), 1);
+      const modelDimensions = box.getSize(new THREE.Vector3());
+      setDimensions(modelDimensions);
+      const size = Math.max(...modelDimensions.toArray(), 1);
       camera.position.set(center.x + size * 1.8, center.y + size * 1.3, center.z + size * 1.8);
       camera.near = Math.max(size / 1000, 0.1); camera.far = size * 30; camera.updateProjectionMatrix();
       controls.target.copy(center); controls.update();
+
+      const measurementLayer = new THREE.Group();
+      scene.add(measurementLayer);
+      const selectedPoints: THREE.Vector3[] = [];
+      const markerMaterial = new THREE.PointsMaterial({
+        color: 0xe87500,
+        size: 6,
+        sizeAttenuation: false,
+        depthTest: false,
+      });
+      const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0xe87500,
+        depthTest: false,
+      });
+      const deltaLineMaterials = [
+        new THREE.LineBasicMaterial({ color: 0xa52f2f, depthTest: false }),
+        new THREE.LineBasicMaterial({ color: 0x367638, depthTest: false }),
+        new THREE.LineBasicMaterial({ color: 0x315f9b, depthTest: false }),
+      ];
+      const clearMeasurement = () => {
+        selectedPoints.length = 0;
+        measurementLayer.children.forEach((object) => {
+          if (object instanceof THREE.Line || object instanceof THREE.Points) object.geometry.dispose();
+        });
+        measurementLayer.clear();
+        setMeasurementPoints(0);
+        setMeasurement(null);
+        setLastSnap("");
+      };
+      clearMeasurementRef.current = clearMeasurement;
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let pointerDown: { x: number; y: number } | null = null;
+      const setPointerRay = (event: PointerEvent) => {
+        if (!renderer) return;
+        const bounds = renderer.domElement.getBoundingClientRect();
+        pointer.set(
+          ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+          -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+        );
+        raycaster.setFromCamera(pointer, camera);
+      };
+      const onPointerDown = (event: PointerEvent) => {
+        pointerDown = { x: event.clientX, y: event.clientY };
+      };
+      const onPointerUp = (event: PointerEvent) => {
+        if (!measureEnabledRef.current || event.button !== 0 || !pointerDown || !renderer) return;
+        const movement = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y);
+        pointerDown = null;
+        if (movement > 5) return;
+        setPointerRay(event);
+        const surfaceHit = raycaster.intersectObjects(group.children, true)
+          .find((intersection) => intersection.object instanceof THREE.Mesh);
+        if (!surfaceHit) return;
+        const worldUnitsPerPixel = (
+          2 * surfaceHit.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+        ) / Math.max(renderer.domElement.clientHeight, 1);
+        raycaster.params.Line.threshold = worldUnitsPerPixel * 11;
+        const edgeHit = raycaster.intersectObjects(edgeObjects, false)
+          .find((intersection) => intersection.distance <= surfaceHit.distance + raycaster.params.Line.threshold * 2);
+        let point = surfaceHit.point.clone();
+        let snapLabel = "Surface point";
+        if (edgeHit) {
+          point = edgeHit.point.clone();
+          snapLabel = "Edge";
+          const circleCenters = edgeHit.object.userData.circleCenters as Map<number, THREE.Vector3> | undefined;
+          const localCenter = circleCenters?.get(edgeHit.index ?? -1);
+          if (localCenter) {
+            point = edgeHit.object.localToWorld(localCenter.clone());
+            snapLabel = "Circle / radius center";
+          }
+        }
+        if (selectedPoints.length === 2) clearMeasurement();
+        selectedPoints.push(point);
+        const markerGeometry = new THREE.BufferGeometry().setFromPoints([point]);
+        const marker = new THREE.Points(markerGeometry, markerMaterial);
+        marker.renderOrder = 10;
+        measurementLayer.add(marker);
+        setLastSnap(snapLabel);
+        setMeasurementPoints(selectedPoints.length);
+        if (selectedPoints.length === 2) {
+          const lineGeometry = new THREE.BufferGeometry().setFromPoints(selectedPoints);
+          const line = new THREE.Line(lineGeometry, lineMaterial);
+          line.renderOrder = 10;
+          measurementLayer.add(line);
+          const deltaCorners = [
+            selectedPoints[0],
+            new THREE.Vector3(selectedPoints[1].x, selectedPoints[0].y, selectedPoints[0].z),
+            new THREE.Vector3(selectedPoints[1].x, selectedPoints[1].y, selectedPoints[0].z),
+            selectedPoints[1],
+          ];
+          for (let index = 0; index < 3; index++) {
+            const deltaGeometry = new THREE.BufferGeometry().setFromPoints([
+              deltaCorners[index],
+              deltaCorners[index + 1],
+            ]);
+            const deltaLine = new THREE.Line(deltaGeometry, deltaLineMaterials[index]);
+            deltaLine.renderOrder = 11;
+            measurementLayer.add(deltaLine);
+          }
+          setMeasurement({
+            distance: selectedPoints[0].distanceTo(selectedPoints[1]),
+            delta: new THREE.Vector3(
+              Math.abs(selectedPoints[1].x - selectedPoints[0].x),
+              Math.abs(selectedPoints[1].y - selectedPoints[0].y),
+              Math.abs(selectedPoints[1].z - selectedPoints[0].z),
+            ),
+          });
+        }
+      };
+      const preventContextMenu = (event: MouseEvent) => event.preventDefault();
+      renderer.domElement.addEventListener("pointerdown", onPointerDown, true);
+      renderer.domElement.addEventListener("pointerup", onPointerUp);
+      renderer.domElement.addEventListener("contextmenu", preventContextMenu);
+      removeMeasurementListeners = () => {
+        renderer?.domElement.removeEventListener("pointerdown", onPointerDown, true);
+        renderer?.domElement.removeEventListener("pointerup", onPointerUp);
+        renderer?.domElement.removeEventListener("contextmenu", preventContextMenu);
+        markerMaterial.dispose();
+        lineMaterial.dispose();
+        deltaLineMaterials.forEach((material) => material.dispose());
+      };
+
       const resize = () => {
         if (!renderer) return;
         const width = container.clientWidth || 700; const height = container.clientHeight || 480;
         renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix();
+        controls?.handleResize();
       };
       resizeObserver = new ResizeObserver(resize); resizeObserver.observe(container); resize();
       const animate = () => { frame = requestAnimationFrame(animate); controls?.update(); if (renderer && scene) renderer.render(scene, camera); };
       animate();
     }).catch((loadError: unknown) => !disposed && setError(loadError instanceof Error ? loadError.message : "Could not preview STEP file."));
     return () => {
-      disposed = true; cancelAnimationFrame(frame); resizeObserver?.disconnect(); controls?.dispose(); renderer?.dispose();
+      disposed = true; cancelAnimationFrame(frame); resizeObserver?.disconnect(); removeMeasurementListeners(); controls?.dispose(); renderer?.dispose();
       scene?.traverse((object: any) => { object.geometry?.dispose?.(); object.material?.dispose?.(); });
+      clearMeasurementRef.current = () => {};
     };
   }, [url]);
-  return <div className="step-preview" ref={containerRef}>{error ? <p className="file-preview-error">{error}</p> : <p className="file-preview-loading">Loading 3D model…</p>}</div>;
+  const formatDimension = (value: number) => {
+    const rounded = Math.round(value * 100) / 100;
+    return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2).replace(/0$/, "");
+  };
+  return (
+    <div className="step-preview">
+      <div className="step-preview-canvas" ref={containerRef} />
+      {error
+        ? <p className="file-preview-error step-preview-message">{error}</p>
+        : !dimensions && <p className="file-preview-loading step-preview-message">Loading 3D model…</p>}
+      {dimensions && (
+        <div className="step-preview-toolbar">
+          <button
+            type="button"
+            className={measureEnabled ? "active" : ""}
+            aria-pressed={measureEnabled}
+            onClick={() => setMeasureEnabled((enabled) => !enabled)}
+          >
+            {measureEnabled ? "Stop measuring" : "Measure"}
+          </button>
+          {(measurementPoints > 0 || measurement !== null) && (
+            <button type="button" onClick={() => clearMeasurementRef.current()}>Clear</button>
+          )}
+          {measurement ? (
+            <span className="step-measurement-result">
+              <strong>Axis offsets — use the axis running along the tube</strong>
+              <span className="step-axis-measurements">
+                <b className="axis-x">X&nbsp; {formatDimension(measurement.delta.x)} mm</b>
+                <b className="axis-y">Y&nbsp; {formatDimension(measurement.delta.y)} mm</b>
+                <b className="axis-z">Z&nbsp; {formatDimension(measurement.delta.z)} mm</b>
+              </span>
+              <small>3D diagonal: {formatDimension(measurement.distance)} mm — not an axial drilling dimension</small>
+            </span>
+          ) : (
+            <span>
+              {measureEnabled
+                ? measurementPoints === 1
+                  ? `${lastSnap} selected · select the second point`
+                  : "Select two points · nearby visible edges snap automatically"
+                : "Left-drag pan · right-drag rotate · scroll zoom"}
+            </span>
+          )}
+        </div>
+      )}
+      {dimensions && (
+        <div className="step-preview-dimensions" aria-label="Overall model dimensions">
+          <strong>Overall size</strong>
+          <span>X {formatDimension(dimensions.x)} × Y {formatDimension(dimensions.y)} × Z {formatDimension(dimensions.z)} mm</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function FilePreview({ file }: { file: PreviewFile }) {

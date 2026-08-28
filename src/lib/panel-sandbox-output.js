@@ -1,7 +1,7 @@
 // This module is a server-safe extraction of the fabrication rules and drawing
 // markup in /srv/amgs/sandbox/public/app.js. Keep the output logic identical so
 // a CP code has one shop-floor interpretation in both applications.
-const RULES = { stile: 25.4, rail: 19.05, wire: 3, meshX: 20, meshY: 100, endRailCenter: 12.7, midrailStandard: 733.65, midrailLower: 433.65, cutoutReuse: 200 };
+const RULES = { stile: 25.4, rail: 19.05, wire: 3, meshX: 20, meshY: 100, endRailInset: 12.7, endRailCenter: 22.225, midrailStandard: 733.65, midrailLower: 433.65, cutoutReuse: 200 };
 const escapeXml = (value) => String(value).replace(/[<>&"']/g, (char) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[char]);
 
 function clippedCutout(panel) {
@@ -37,8 +37,11 @@ function supportRails(panel) {
 function cutoutVerticals(panel) {
   if (!panel.cutoutSelected) return [];
   const cut = clippedCutout(panel); const verticals = [];
-  if (!cut.leftOpen && cut.x > RULES.stile) verticals.push({ x: cut.x - RULES.rail, y: cut.y, length: cut.height, name: 'Cutout left vertical', edge: 'left' });
-  if (!cut.rightOpen && cut.right < panel.width - RULES.stile) verticals.push({ x: cut.right, y: cut.y, length: cut.height, name: 'Cutout right vertical', edge: 'right' });
+  const top = cut.topOpen ? RULES.endRailInset : cut.y;
+  const bottom = cut.bottomOpen ? panel.height - RULES.endRailInset : cut.bottom;
+  const length = Math.max(0, bottom - top);
+  if (!cut.leftOpen && cut.x > RULES.stile && length > 0) verticals.push({ x: cut.x - RULES.rail, y: top, length, name: 'Cutout left vertical', edge: 'left' });
+  if (!cut.rightOpen && cut.right < panel.width - RULES.stile && length > 0) verticals.push({ x: cut.right, y: top, length, name: 'Cutout right vertical', edge: 'right' });
   return verticals;
 }
 
@@ -140,7 +143,8 @@ export function sandboxPanelDrawingSvg(sourcePanel, context) {
   let railSvg = railPieces.map((piece) => `<rect x="${sx(piece.x)}" y="${sy(piece.y)}" width="${piece.length * scale}" height="${Math.max(4, RULES.rail * scale)}"/>`).join('');
   railSvg += railPieces.filter((piece) => piece.split).map((piece, index) => { const x1 = sx(piece.x); const x2 = sx(piece.x + piece.length); const dy = piece.segment === 'left' ? -10 : 10; const yy = sy(piece.y + RULES.rail / 2) + dy; return `<g class="rail-piece-dim"><line x1="${x1}" y1="${yy}" x2="${x2}" y2="${yy}" stroke="#30423b"/><path d="M${x1},${yy} l7,-3 v6z M${x2},${yy} l-7,-3 v6z" fill="#30423b"/><text x="${(x1 + x2) / 2}" y="${yy - 5}" text-anchor="middle" fill="#18201e" font-size="16" font-weight="bold">${piece.length.toFixed(2)} mm</text></g>`; }).join('');
   railSvg += cutoutVerticals(p).map((vertical) => `<rect x="${sx(vertical.x)}" y="${sy(vertical.y)}" width="${Math.max(4, RULES.rail * scale)}" height="${vertical.length * scale}"/>`).join('');
-  const cutDims = p.cutoutSelected ? `<g class="cut"><rect x="${sx(p.cutout.x)}" y="${sy(p.cutout.y)}" width="${p.cutout.width * scale}" height="${p.cutout.height * scale}"/><line x1="${sx(p.cutout.x)}" y1="${sy(p.cutout.y + p.cutout.height) + 20}" x2="${sx(p.cutout.x + p.cutout.width)}" y2="${sy(p.cutout.y + p.cutout.height) + 20}"/><text x="${sx(p.cutout.x + p.cutout.width / 2)}" y="${sy(p.cutout.y + p.cutout.height) + 35}">${p.cutout.width}.0</text><line x1="${sx(p.cutout.x) - 20}" y1="${sy(p.cutout.y)}" x2="${sx(p.cutout.x) - 20}" y2="${sy(p.cutout.y + p.cutout.height)}"/><text x="${sx(p.cutout.x) - 30}" y="${sy(p.cutout.y + p.cutout.height / 2)}" transform="rotate(-90 ${sx(p.cutout.x) - 30} ${sy(p.cutout.y + p.cutout.height / 2)})">${p.cutout.height}.0</text></g>` : '';
+  const cutTop = p.cutout.topOpen ? RULES.endRailInset : p.cutout.y; const cutBottom = p.cutout.bottomOpen ? p.height - RULES.endRailInset : p.cutout.bottom; const cutHeight = Math.max(0, cutBottom - cutTop);
+  const cutDims = p.cutoutSelected ? `<g class="cut"><rect x="${sx(p.cutout.x)}" y="${sy(cutTop)}" width="${p.cutout.width * scale}" height="${cutHeight * scale}"/><line x1="${sx(p.cutout.x)}" y1="${sy(cutBottom) + 20}" x2="${sx(p.cutout.x + p.cutout.width)}" y2="${sy(cutBottom) + 20}"/><text x="${sx(p.cutout.x + p.cutout.width / 2)}" y="${sy(cutBottom) + 35}">${p.cutout.width}.0</text><line x1="${sx(p.cutout.x) - 20}" y1="${sy(cutTop)}" x2="${sx(p.cutout.x) - 20}" y2="${sy(cutBottom)}"/><text x="${sx(p.cutout.x) - 30}" y="${sy(cutTop + cutHeight / 2)}" transform="rotate(-90 ${sx(p.cutout.x) - 30} ${sy(cutTop + cutHeight / 2)})">${cutHeight.toFixed(2)}</text></g>` : '';
   if (p.cutoutSelected) {
     const verticalEdges = new Set(cutoutVerticals(p).map((item) => item.edge)); const horizontalEdges = new Set(supportRails(p).filter((item) => item.edge).map((item) => item.edge));
     const leftTubeX = p.cutout.x - RULES.rail; const rightTubeOuterX = p.cutout.x + p.cutout.width + RULES.rail; const topTubeY = p.cutout.y - RULES.rail; const bottomTubeY = p.cutout.y + p.cutout.height; const leftDatumX = RULES.stile; const rightDatumX = p.width - RULES.stile;

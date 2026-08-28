@@ -6,6 +6,7 @@ import type { PartDemandRow } from "@/types/part-demand";
 
 type SortKey = "partNumber" | "description" | "orderCount" | "requiredQty" | "inventoryQty" | "earliestRequiredDate";
 type SortState = { key: SortKey; direction: "asc" | "desc" };
+type DatePreset = "this-week" | "next-two-weeks" | "this-month";
 
 const columns: { key: SortKey; label: string }[] = [
   { key: "partNumber", label: "Part" },
@@ -23,12 +24,40 @@ function dateLabel(value: string) {
     .format(new Date(Date.UTC(year, month - 1, day, 12)));
 }
 
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function presetRange(preset: DatePreset) {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  if (preset === "this-week") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return { start: localDateKey(start), end: localDateKey(end) };
+  }
+  if (preset === "this-month") {
+    return {
+      start: localDateKey(new Date(today.getFullYear(), today.getMonth(), 1, 12)),
+      end: localDateKey(new Date(today.getFullYear(), today.getMonth() + 1, 0, 12)),
+    };
+  }
+  const end = new Date(today);
+  end.setDate(end.getDate() + 13);
+  return { start: localDateKey(today), end: localDateKey(end) };
+}
+
 export function PartDemandTable() {
   const [rows, setRows] = useState<PartDemandRow[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "requiredQty", direction: "desc" });
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [preset, setPreset] = useState<DatePreset | "">("");
 
   useEffect(() => {
     fetch("/api/parts-demand", { cache: "no-store" })
@@ -43,9 +72,21 @@ export function PartDemandTable() {
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const filtered = query ? rows.filter((row) =>
+    const byDate = startDate || endDate ? rows.flatMap((row) => {
+      const buckets = row.demandByDueDate.filter((bucket) => bucket.dueDate
+        && (!startDate || bucket.dueDate >= startDate)
+        && (!endDate || bucket.dueDate <= endDate));
+      if (!buckets.length) return [];
+      return [{
+        ...row,
+        orderCount: buckets.reduce((total, bucket) => total + bucket.orderCount, 0),
+        requiredQty: buckets.reduce((total, bucket) => total + bucket.requiredQty, 0),
+        earliestRequiredDate: buckets.map((bucket) => bucket.dueDate).sort()[0] || "",
+      }];
+    }) : rows;
+    const filtered = query ? byDate.filter((row) =>
       row.partNumber.toLowerCase().includes(query)
-      || row.description.toLowerCase().includes(query)) : rows;
+      || row.description.toLowerCase().includes(query)) : byDate;
     return [...filtered].sort((left, right) => {
       const a = left[sort.key];
       const b = right[sort.key];
@@ -55,7 +96,21 @@ export function PartDemandTable() {
       return (sort.direction === "asc" ? comparison : -comparison)
         || left.partNumber.localeCompare(right.partNumber, undefined, { numeric: true });
     });
-  }, [rows, search, sort]);
+  }, [rows, search, sort, startDate, endDate]);
+
+  const selectPreset = (value: DatePreset) => {
+    const range = presetRange(value);
+    setStartDate(range.start);
+    setEndDate(range.end);
+    setPreset(value);
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setStartDate("");
+    setEndDate("");
+    setPreset("");
+  };
 
   const changeSort = (key: SortKey) => {
     setSort((current) => current.key === key
@@ -72,7 +127,18 @@ export function PartDemandTable() {
         </div>
         <span>{visible.length} parts</span>
       </div>
-      <input className="floor-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search part or description" />
+      <div className="part-demand-filters">
+        <label className="part-demand-search"><span>Part or description</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search part demand" /></label>
+        <label><span>Order due from</span><input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setPreset(""); }} /></label>
+        <label><span>Order due through</span><input type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPreset(""); }} /></label>
+        <button className="secondary-button" type="button" onClick={clearFilters}>Clear</button>
+        <div className="part-demand-presets" aria-label="Due date presets">
+          <button type="button" aria-pressed={preset === "this-week"} onClick={() => selectPreset("this-week")}>This week</button>
+          <button type="button" aria-pressed={preset === "next-two-weeks"} onClick={() => selectPreset("next-two-weeks")}>Next two weeks</button>
+          <button type="button" aria-pressed={preset === "this-month"} onClick={() => selectPreset("this-month")}>This month</button>
+        </div>
+      </div>
+      {startDate && endDate && startDate > endDate && <p className="error">The start date must be on or before the end date.</p>}
       {loading && <p>Loading part demand…</p>}
       {error && <p className="error">{error}</p>}
       {!loading && !error && (

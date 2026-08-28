@@ -105,7 +105,15 @@ export function isPublicPath(pathname: string, method = "GET"): boolean {
     return true;
   }
 
-  if (pathname === "/api/parts-demand" || pathname === "/api/custom-parts/current") {
+  if (
+    pathname === "/api/parts-demand"
+    || pathname === "/api/custom-parts/current"
+    || pathname === "/api/custom-parts/completed"
+  ) {
+    return true;
+  }
+
+  if (pathname.startsWith("/api/custom-parts/library") || pathname === "/api/custom-parts/order-assignments") {
     return true;
   }
 
@@ -137,6 +145,10 @@ export function isPublicPath(pathname: string, method = "GET"): boolean {
     return true;
   }
 
+  if (/^\/api\/custom-parts\/[^/]+\/complete$/.test(pathname)) {
+    return method === "POST";
+  }
+
   if (pathname.endsWith("/notify-engineering")) {
     return method === "POST";
   }
@@ -156,6 +168,12 @@ export function canAccessPath(pathname: string, role: Role): boolean {
 
   if (pathname.startsWith("/custom-part")) {
     return hasPermission(role, "customParts");
+  }
+
+  // Every signed-in role can view and use reusable library parts. The API
+  // still calls requireAuth, so anonymous floor sessions cannot mutate it.
+  if (pathname === "/api/custom-parts/order-lines") {
+    return true;
   }
 
   if (pathname.startsWith("/parts/edit")) {

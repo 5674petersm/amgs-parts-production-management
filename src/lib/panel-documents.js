@@ -6,7 +6,7 @@ import SVGtoPDF from "svg-to-pdfkit";
 import { sandboxConsolidatedCutlist, sandboxPanelCutlist, sandboxPanelDrawingSvg } from "@/lib/panel-sandbox-output";
 
 const PANEL_PATTERN = /\bCP-(\d{4})-(\d{4})-(\d{4})-([A-Z])-([A-Z])-([A-Z])-([A-Z])-([A-Z])(?:-(\d{4})-(\d{4})-(\d{4})-(\d{4}))?\b/i;
-const RULES = { stile: 25.4, rail: 19.05, meshX: 20, meshY: 100, endRailCenter: 12.7, midrailStandard: 733.65, midrailLower: 433.65, cutoutReuse: 200 };
+const RULES = { stile: 25.4, rail: 19.05, meshX: 20, meshY: 100, endRailInset: 12.7, endRailCenter: 22.225, midrailStandard: 733.65, midrailLower: 433.65, cutoutReuse: 200 };
 
 export function parsePanelPartNumber(value) {
   const match = String(value || "").trim().toUpperCase().match(PANEL_PATTERN);
@@ -64,8 +64,11 @@ function supportRails(panel) {
 function cutoutVerticals(panel) {
   if (!panel.cutoutSelected) return [];
   const cut = clippedCutout(panel); const verticals = [];
-  if (!cut.leftOpen && cut.x > RULES.stile) verticals.push({ x: cut.x - RULES.rail, y: cut.y, length: cut.height, name: 'Cutout left vertical', edge: 'left' });
-  if (!cut.rightOpen && cut.right < panel.width - RULES.stile) verticals.push({ x: cut.right, y: cut.y, length: cut.height, name: 'Cutout right vertical', edge: 'right' });
+  const top = cut.topOpen ? RULES.endRailInset : cut.y;
+  const bottom = cut.bottomOpen ? panel.height - RULES.endRailInset : cut.bottom;
+  const length = Math.max(0, bottom - top);
+  if (!cut.leftOpen && cut.x > RULES.stile && length > 0) verticals.push({ x: cut.x - RULES.rail, y: top, length, name: 'Cutout left vertical', edge: 'left' });
+  if (!cut.rightOpen && cut.right < panel.width - RULES.stile && length > 0) verticals.push({ x: cut.right, y: top, length, name: 'Cutout right vertical', edge: 'right' });
   return verticals;
 }
 

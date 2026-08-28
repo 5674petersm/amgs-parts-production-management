@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { listCustomPartOrders } from "@/lib/custom-parts";
+import { listCustomPartOrderChoices } from "@/lib/custom-parts";
 
 export async function GET() {
   try {
-    const orders = await listCustomPartOrders();
-    return NextResponse.json({ orders });
+    const orderChoices = await listCustomPartOrderChoices();
+    return NextResponse.json({
+      orders: orderChoices.map((choice) => choice.order),
+      orderChoices,
+    });
   } catch (error) {
     console.error("GET /api/custom-parts/orders", error);
     return NextResponse.json(

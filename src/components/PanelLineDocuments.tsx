@@ -17,7 +17,7 @@ export function PanelLineDocuments({ documents }: { documents: ShopFloorPanelDoc
           <div className="panel-document-set" key={`${document.orderNumber}:${document.orderLineId}`}>
             <strong>{document.partNumber}</strong>
             <CustomPartFilePreview file={{ id: `${document.orderLineId}-drawing`, name: document.drawingOriginalName || `${document.partNumber} approved drawing.pdf`, mimeType: "application/pdf", url: `${base}/drawing` }} />
-            <CustomPartFilePreview file={{ id: `${document.orderLineId}-cutlist`, name: document.cutlistOriginalName || `${document.partNumber} approved cutlist.pdf`, mimeType: "application/pdf", url: `${base}/cutlist` }} />
+            {document.cutlistMode === "none" ? <span className="panel-no-cutlist">No cutlist required</span> : <CustomPartFilePreview file={{ id: `${document.orderLineId}-cutlist`, name: document.cutlistOriginalName || `${document.partNumber} approved cutlist.pdf`, mimeType: "application/pdf", url: `${base}/cutlist` }} />}
           </div>
         );
       })}

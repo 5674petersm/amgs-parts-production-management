@@ -22,6 +22,10 @@ CREATE TABLE dbo.tblcustomparts (
     SubmittedAt           DATETIME2(0) NOT NULL,
     CompletedAt           DATETIME2(0) NULL,
     CompletedBy           NVARCHAR(256) NULL,
+    CustomPartGroupID     UNIQUEIDENTIFIER NULL,
+    CustomPartGroupedBy   NVARCHAR(256) NULL,
+    CustomPartGroupedAt   DATETIME2(0) NULL,
+    SourceLibraryPartID   INT NULL,
 
     CONSTRAINT PK_tblcustomparts PRIMARY KEY CLUSTERED (CustomPartID),
     CONSTRAINT UQ_tblcustomparts_PartNumber UNIQUE (PartNumber),
@@ -34,6 +38,9 @@ CREATE NONCLUSTERED INDEX IX_tblcustomparts_AMGSOrderNumber
 
 CREATE NONCLUSTERED INDEX IX_tblcustomparts_SubmittedAt
     ON dbo.tblcustomparts (SubmittedAt DESC);
+
+CREATE NONCLUSTERED INDEX IX_tblcustomparts_GroupID
+    ON dbo.tblcustomparts (CustomPartGroupID) WHERE CustomPartGroupID IS NOT NULL;
 
 -- Grant your app SQL user:
 --   SELECT, INSERT, UPDATE, DELETE on dbo.tblcustomparts

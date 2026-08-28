@@ -7,9 +7,21 @@ import type { PanelOrder, PanelOrderItem } from "@/types/panel-order";
 
 function dateLabel(value: string) {
   if (!value) return "No due date";
-  const [year, month, day] = value.split("-").map(Number);
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "Invalid due date";
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (
+    !Number.isFinite(date.getTime())
+    || date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return "Invalid due date";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
-    .format(new Date(Date.UTC(year, month - 1, day, 12)));
+    .format(date);
 }
 
 function SelectionCheckbox({ checked, mixed, label, onChange }: { checked: boolean; mixed?: boolean; label: string; onChange: (checked: boolean) => void }) {
@@ -54,6 +66,7 @@ export function PanelOrders() {
   const selectedPanels = useMemo(() => orders.flatMap((order) => order.panels
     .filter((panel) => selected.has(panel.id))
     .map((panel) => ({ panel, order }))), [orders, selected]);
+  const selectedCutlistCount = selectedPanels.filter(({ panel }) => panel.cutlistMode !== "none").length;
 
   const togglePanel = (id: string, checked: boolean) => setSelected((current) => {
     const next = new Set(current); if (checked) next.add(id); else next.delete(id); return next;
@@ -97,7 +110,7 @@ export function PanelOrders() {
         <input className="floor-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order, customer, or CP number" />
         <span>{selectedPanels.length} panels selected</span>
         <button className="secondary-button" type="button" disabled={!selectedPanels.length || Boolean(generating)} onClick={() => void downloadBatch("drawings")}>{generating === "drawings" ? "Building…" : "Combined drawings PDF"}</button>
-        <button className="primary-button" type="button" disabled={!selectedPanels.length || Boolean(generating)} onClick={() => void downloadBatch("cutlist")}>{generating === "cutlist" ? "Building…" : "Consolidated cutlist PDF"}</button>
+        <button className="primary-button" type="button" disabled={!selectedCutlistCount || Boolean(generating)} onClick={() => void downloadBatch("cutlist")}>{generating === "cutlist" ? "Building…" : `Consolidated cutlist PDF${selectedPanels.length && selectedCutlistCount !== selectedPanels.length ? ` (${selectedCutlistCount})` : ""}`}</button>
       </div>
       {loading && <p>Loading panel orders…</p>}
       {error && <p className="error">{error}</p>}
@@ -118,7 +131,7 @@ export function PanelOrders() {
                   <SelectionCheckbox checked={selected.has(panel.id)} label={`Select ${panel.partNumber}`} onChange={(checked) => togglePanel(panel.id, checked)} />
                   <div><strong>{panel.partNumber}</strong><span>Line {panel.lineNumber ?? "—"} · Qty {panel.quantity}</span><small>{panel.notes}</small></div>
                   <CustomPartFilePreview file={previewFile(panel, order, "drawing")} />
-                  <CustomPartFilePreview file={previewFile(panel, order, "cutlist")} />
+                  {panel.cutlistMode === "none" ? <span className="panel-no-cutlist">No cutlist required</span> : <CustomPartFilePreview file={previewFile(panel, order, "cutlist")} />}
                 </div>
               ))}
               {!order.panels.length && <p className="panel-document-message">No engineering-approved panel documents are assigned to this order.</p>}

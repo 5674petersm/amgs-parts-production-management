@@ -12,7 +12,8 @@ import {
   reserveCustomPartNumber,
   updateCustomPartDriveInfo,
 } from "@/lib/custom-parts";
-import { uploadCustomPartToDrive } from "@/lib/google-drive";
+import { createPartLibraryItem, getPartLibraryItem } from "@/lib/custom-part-library";
+import { copyCustomPartToDrive, copyCustomPartToLibrary, trashCustomPartFolder, uploadCustomPartToDrive } from "@/lib/google-drive";
 import { setCustomPartLineMappings, validateCustomPartLineMappings } from "@/lib/shop-floor-orders";
 
 export const maxDuration = 120;
@@ -36,7 +37,10 @@ export async function POST(request: Request) {
   const description = String(formData.get("description") ?? "").trim();
   const material = String(formData.get("material") ?? "").trim();
   const hasCustomColor = String(formData.get("hasCustomColor") ?? "") === "true";
+  const standardColor = String(formData.get("standardColor") ?? "").trim();
   const customColor = String(formData.get("customColor") ?? "").trim();
+  const saveToLibrary = String(formData.get("saveToLibrary") ?? "") === "true";
+  const sourceLibraryPartId = Number(formData.get("sourceLibraryPartId") || 0);
   const qtyNeeded = Number(formData.get("qtyNeeded"));
   const mappedOrderLineIds = [...new Set(formData.getAll("mappedOrderLineIds")
     .map((value) => String(value).trim())
@@ -67,12 +71,23 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (!hasCustomColor && !["Black", "Yellow", "No Color"].includes(standardColor)) {
+    return NextResponse.json({ error: "Select a standard color or No Color." }, { status: 400 });
+  }
+  const finishColor = hasCustomColor ? customColor : standardColor;
 
   const files = drawingEntries.filter(
     (entry): entry is File => entry instanceof File && entry.size > 0,
   );
 
-  if (files.length === 0) {
+  const sourceLibraryPart = Number.isInteger(sourceLibraryPartId) && sourceLibraryPartId > 0
+    ? await getPartLibraryItem(sourceLibraryPartId).catch(() => null)
+    : null;
+  if (sourceLibraryPartId && !sourceLibraryPart) {
+    return NextResponse.json({ error: "The selected library part was not found." }, { status: 400 });
+  }
+
+  if (files.length === 0 && !sourceLibraryPart) {
     return NextResponse.json(
       { error: "Add at least one drawing file." },
       { status: 400 },
@@ -103,6 +118,8 @@ export async function POST(request: Request) {
   }
 
   let reservedPartId: number | null = null;
+  let orderPartFolderId = "";
+  let libraryFolderId = "";
 
   try {
     await validateCustomPartLineMappings(amgsOrderNumber, mappedOrderLineIds);
@@ -113,9 +130,10 @@ export async function POST(request: Request) {
       qtyNeeded,
       material,
       hasCustomColor,
-      customColor: hasCustomColor ? customColor : "",
+      customColor: finishColor,
       submittedBy: userEmail,
       mappedOrderLineIds,
+      sourceLibraryPartId: sourceLibraryPart?.libraryPartId || null,
     });
     reservedPartId = reserved.customPartId;
 
@@ -127,18 +145,18 @@ export async function POST(request: Request) {
       })),
     );
 
-    const driveResult = await uploadCustomPartToDrive({
-      amgsOrderNumber,
-      customerName,
-      partNumber: reserved.partNumber,
-      description,
-      qtyNeeded,
-      material,
-      hasCustomColor,
-      customColor: hasCustomColor ? customColor : "",
-      submittedBy: userEmail,
-      files: fileBuffers,
-    });
+    const driveResult = sourceLibraryPart
+      ? await copyCustomPartToDrive({
+        sourcePartFolderId: sourceLibraryPart.driveFolderId,
+        amgsOrderNumber, customerName, partNumber: reserved.partNumber, description,
+        qtyNeeded, material, hasCustomColor, customColor: finishColor, submittedBy: userEmail,
+      })
+      : await uploadCustomPartToDrive({
+        amgsOrderNumber, customerName, partNumber: reserved.partNumber, description,
+        qtyNeeded, material, hasCustomColor, customColor: finishColor,
+        submittedBy: userEmail, files: fileBuffers,
+      });
+    orderPartFolderId = driveResult.partFolderId;
 
     await updateCustomPartDriveInfo(reserved.customPartId, {
       orderFolderId: driveResult.orderFolderId,
@@ -151,6 +169,30 @@ export async function POST(request: Request) {
       orderLineIds: mappedOrderLineIds,
     });
 
+    let libraryPartId: number | null = null;
+    if (saveToLibrary && !sourceLibraryPart) {
+      const libraryDrive = await copyCustomPartToLibrary({
+        sourcePartFolderId: driveResult.partFolderId,
+        partName: description,
+        description,
+        material,
+        hasCustomColor,
+        customColor: finishColor,
+        submittedBy: userEmail,
+      });
+      libraryFolderId = libraryDrive.partFolderId;
+      libraryPartId = await createPartLibraryItem({
+        partName: description,
+        description,
+        material,
+        hasCustomColor,
+        color: finishColor,
+        driveFolderId: libraryDrive.partFolderId,
+        folderUrl: libraryDrive.folderUrl,
+        createdBy: userEmail,
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       partNumber: reserved.partNumber,
@@ -158,6 +200,7 @@ export async function POST(request: Request) {
       partFolderId: driveResult.partFolderId,
       folderUrl: driveResult.folderUrl,
       uploadedFiles: driveResult.uploadedFiles,
+      libraryPartId,
     });
   } catch (error) {
     if (reservedPartId !== null) {
@@ -167,6 +210,8 @@ export async function POST(request: Request) {
         console.error("Failed to roll back reserved custom part", cleanupError);
       }
     }
+    if (orderPartFolderId) await trashCustomPartFolder(orderPartFolderId).catch(() => {});
+    if (libraryFolderId) await trashCustomPartFolder(libraryFolderId).catch(() => {});
 
     console.error("POST /api/custom-parts", error);
     const message =

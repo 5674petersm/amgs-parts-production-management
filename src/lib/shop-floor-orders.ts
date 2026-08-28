@@ -13,6 +13,10 @@ type DashboardOrder = {
   dueDate?: string | null;
   isFullyStandard?: boolean;
   workflow?: {
+    customerSignedOff?: {
+      checked?: boolean;
+      date?: string | null;
+    };
     engineeringCompletedDate?: string | null;
     productionCompletedDate?: string | null;
     notes?: string | null;
@@ -61,8 +65,9 @@ function shopFloorHeaders(): HeadersInit {
   };
 }
 
-export async function getShopFloorOrders(): Promise<ShopFloorOrdersResult> {
-  const response = await fetch(`${dashboardApiUrl()}/api/production-orders`, {
+export async function getShopFloorOrders(forceRefresh = false): Promise<ShopFloorOrdersResult> {
+  const refreshQuery = forceRefresh ? "?refresh=1" : "";
+  const response = await fetch(`${dashboardApiUrl()}/api/production-orders${refreshQuery}`, {
     cache: "no-store",
     headers: { Accept: "application/json" },
   });
@@ -79,6 +84,8 @@ export async function getShopFloorOrders(): Promise<ShopFloorOrdersResult> {
       customer: order.customer?.trim() || "Unknown customer",
       dueDate: order.dueDate?.slice(0, 10) || "",
       isReleased: Boolean(order.workflow?.engineeringCompletedDate),
+      isCustomerApproved: Boolean(order.workflow?.customerSignedOff?.checked),
+      customerApprovedDate: order.workflow?.customerSignedOff?.date?.slice(0, 10) || "",
       isFullyStandard: Boolean(order.isFullyStandard),
       notes: order.workflow?.notes?.trim() || "",
     }))

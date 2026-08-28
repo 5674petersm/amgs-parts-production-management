@@ -3,6 +3,8 @@ export type ShopFloorOrder = {
   customer: string;
   dueDate: string;
   isReleased: boolean;
+  isCustomerApproved: boolean;
+  customerApprovedDate: string;
   isFullyStandard: boolean;
   notes: string;
 };
@@ -28,6 +30,7 @@ export type ShopFloorOrderFileGroup = {
   customPartId: number;
   partNumber: string;
   description: string;
+  completedAt: string | null;
   folderUrl: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
   mappedOrderLineIds: string[];
@@ -39,7 +42,7 @@ export type ShopFloorPanelDocument = {
   partNumber: string;
   drawingMode: "generated" | "uploaded";
   drawingOriginalName: string;
-  cutlistMode: "generated" | "uploaded";
+  cutlistMode: "generated" | "uploaded" | "none";
   cutlistOriginalName: string;
   assignedBy: string;
   assignedAt: string;

@@ -17,6 +17,9 @@ export async function GET(request: Request, context: RouteContext) {
     const documents = await getPanelDocumentAssignments(orderId, true);
     const document = documents.find((item) => item.orderLineId === lineId);
     if (!document) return NextResponse.json({ error: "Approved panel documents were not found." }, { status: 404 });
+    if (kind === "cutlist" && document.cutlistMode === "none") {
+      return NextResponse.json({ error: "No cutlist is required for this panel." }, { status: 404 });
+    }
     let bytes: Buffer | ArrayBuffer;
     let fileName: string;
     if (document[`${kind}Mode`] === "uploaded") {

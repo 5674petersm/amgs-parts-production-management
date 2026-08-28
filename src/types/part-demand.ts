@@ -6,4 +6,9 @@ export type PartDemandRow = {
   requiredQty: number;
   inventoryQty: number;
   earliestRequiredDate: string;
+  demandByDueDate: {
+    dueDate: string;
+    orderCount: number;
+    requiredQty: number;
+  }[];
 };

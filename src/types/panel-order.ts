@@ -7,7 +7,7 @@ export type PanelOrderItem = {
   notes: string;
   drawingMode: "generated" | "uploaded";
   drawingName: string;
-  cutlistMode: "generated" | "uploaded";
+  cutlistMode: "generated" | "uploaded" | "none";
   cutlistName: string;
 };
 

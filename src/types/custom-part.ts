@@ -31,9 +31,13 @@ export type CustomPartDraft = {
   qtyNeeded: number;
   material: string;
   hasCustomColor: boolean;
+  standardColor: string;
   customColor: string;
   drawingFiles: File[];
   mappedOrderLineIds: string[];
+  saveToLibrary: boolean;
+  sourceLibraryPartId: number | null;
+  sourceLibraryPartName: string;
 };
 
 export type CustomPartOrderLookup = {
@@ -68,6 +72,9 @@ export type CurrentCustomPart = {
   driveFolderId: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
   mappedOrderLineIds: string[];
+  cut: boolean;
+  completedAt: string | null;
+  groupId: string | null;
 };
 
 export type CustomPartOrderLineChoice = {
@@ -76,4 +83,45 @@ export type CustomPartOrderLineChoice = {
   partNumber: string;
   description: string;
   notes: string;
+};
+
+export type CopyableCustomPart = {
+  customPartId: number;
+  partNumber: string;
+  description: string;
+  qtyNeeded: number;
+  material: string;
+  color: string;
+  fileCount: number;
+  mappedLineCount: number;
+  completed: boolean;
+};
+
+export type PartLibraryItem = {
+  libraryPartId: number;
+  partName: string;
+  description: string;
+  material: string;
+  hasCustomColor: boolean;
+  color: string;
+  folderUrl: string;
+  files: { id: string; name: string; mimeType: string; url: string }[];
+  createdBy: string;
+  createdAt: string;
+};
+
+export type PartLibraryGroupMember = {
+  libraryPartId: number;
+  qtyPerSet: number;
+  sortOrder: number;
+};
+
+export type PartLibraryGroup = {
+  libraryGroupId: number;
+  groupName: string;
+  description: string;
+  members: PartLibraryGroupMember[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 };

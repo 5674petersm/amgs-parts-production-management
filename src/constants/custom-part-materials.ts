@@ -9,6 +9,8 @@ export const CUSTOM_PART_MATERIALS = [
   "2x2\"",
   "3x3\"",
   "Aluminum",
+  "Misc",
+  "Polycarbonate",
 ] as const;
 
 export type CustomPartMaterial = (typeof CUSTOM_PART_MATERIALS)[number];
