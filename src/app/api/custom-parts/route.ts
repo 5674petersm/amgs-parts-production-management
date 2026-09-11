@@ -15,6 +15,7 @@ import {
 import { createPartLibraryItem, getPartLibraryItem } from "@/lib/custom-part-library";
 import { copyCustomPartToDrive, copyCustomPartToLibrary, trashCustomPartFolder, uploadCustomPartToDrive } from "@/lib/google-drive";
 import { setCustomPartLineMappings, validateCustomPartLineMappings } from "@/lib/shop-floor-orders";
+import { normalizeCustomPartProcesses } from "@/constants/custom-part-processes";
 
 export const maxDuration = 120;
 
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
   const saveToLibrary = String(formData.get("saveToLibrary") ?? "") === "true";
   const sourceLibraryPartId = Number(formData.get("sourceLibraryPartId") || 0);
   const qtyNeeded = Number(formData.get("qtyNeeded"));
+  const requiredProcesses = normalizeCustomPartProcesses(formData.getAll("requiredProcesses"));
   const mappedOrderLineIds = [...new Set(formData.getAll("mappedOrderLineIds")
     .map((value) => String(value).trim())
     .filter(Boolean))];
@@ -134,6 +136,7 @@ export async function POST(request: Request) {
       submittedBy: userEmail,
       mappedOrderLineIds,
       sourceLibraryPartId: sourceLibraryPart?.libraryPartId || null,
+      requiredProcesses: sourceLibraryPart?.requiredProcesses || requiredProcesses,
     });
     reservedPartId = reserved.customPartId;
 
@@ -190,6 +193,7 @@ export async function POST(request: Request) {
         driveFolderId: libraryDrive.partFolderId,
         folderUrl: libraryDrive.folderUrl,
         createdBy: userEmail,
+        requiredProcesses,
       });
     }
 

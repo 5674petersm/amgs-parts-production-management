@@ -106,26 +106,7 @@ function stilePieces(panel) {
 }
 
 export function panelCutlist(panel, quantity = 1) {
-  const rows = [];
-  const stileGroups = new Map();
-  for (const piece of stilePieces(panel)) {
-    const localTaps = tapLocations(panel).filter((value) => value >= piece.y && value <= piece.y + piece.length).map((value) => value - piece.y);
-    const note = localTaps.length ? `Drill/tap local Y ${localTaps.map((value) => value.toFixed(1)).join(', ')}` : 'No drilling';
-    const key = `${piece.length.toFixed(3)}|${note}`;
-    const group = stileGroups.get(key) || { item: 'ST', material: 'Mild steel tube', profile: '25.4 × 25.4 sq.', length: piece.length, qty: 0, sides: [], note };
-    group.qty += quantity; group.sides.push(piece.side); stileGroups.set(key, group);
-  }
-  [...stileGroups.values()].forEach((row, index) => rows.push({ ...row, item: `ST-${String(index + 1).padStart(2, '0')}`, note: `${[...new Set(row.sides)].join(' + ')} stile · ${row.note}` }));
-  const railGroups = new Map();
-  for (const piece of horizontalRailPieces(panel)) {
-    const key = piece.length.toFixed(3); const description = `${piece.name}${piece.segment === 'full' ? '' : ` · ${piece.segment} segment`}`;
-    const group = railGroups.get(key) || { item: 'RL', material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: piece.length, qty: 0, descriptions: new Set() };
-    group.qty += quantity; group.descriptions.add(description); railGroups.set(key, group);
-  }
-  [...railGroups.values()].forEach((row, index) => rows.push({ ...row, item: `RL-${String(index + 1).padStart(2, '0')}`, note: [...row.descriptions].join('; ') }));
-  const verticals = cutoutVerticals(panel);
-  if (verticals.length) rows.push({ item: 'CV-01', material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: verticals[0].length, qty: verticals.length * quantity, note: `${verticals.map((item) => item.edge).join(' + ')} cutout verticals` });
-  return rows;
+  return sandboxPanelCutlist(panel, Math.max(1, Number(quantity || 1)));
 }
 
 function pdfBuffer(draw) {
@@ -291,7 +272,7 @@ export function createApprovedPanelDrawingPdf(drawingSvg) {
 
 function renderCutlistPages(doc, rows, context, uniquePanels) {
     doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 28 });
-    const totalPieces = rows.reduce((sum, row) => sum + row.qty, 0);
+    const totalPieces = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
     doc.fillColor('#587067').font('Helvetica-Bold').fontSize(8).text('AMGS ENGINEERING', 28, 28, { characterSpacing: 1.2 });
     doc.fillColor('#17201e').font('Times-Roman').fontSize(25).text('Consolidated Cutlist', 28, 43);
     doc.fillColor('#66716c').font('Helvetica').fontSize(10).text(`${context.customer || 'CUSTOMER'} · Job ${context.order || 'JOB'}`, 28, 73);
@@ -300,14 +281,38 @@ function renderCutlistPages(doc, rows, context, uniquePanels) {
     doc.fillColor('#173f36').font('Helvetica-Bold').fontSize(15).text(String(totalPieces), 660, 52, { width: 30, align: 'right' });
     doc.fillColor('#747d79').font('Helvetica').fontSize(8).text('total cut pieces', 695, 57);
     doc.strokeColor('#173f36').lineWidth(2).moveTo(28, 93).lineTo(764, 93).stroke();
-    const widths = [46, 155, 118, 76, 42, 299]; const headings = ['Item', 'Contributing part numbers', 'Material / profile', 'Cut length', 'Qty', 'Operation / note']; let y = 108;
+    // Match the reviewed dashboard cutlist: shop-critical values first, with
+    // contributing part numbers last. Long contributor lists are continued on
+    // additional physical rows so they are never painted outside a cell/page.
+    const widths = [42, 78, 72, 221, 115, 204];
+    const headings = ['Qty', 'Cut length', 'Material', 'Hole locations / notes', 'Item', 'Contributing part numbers'];
+    const profileLabel = (row) => String(row.profile || '').startsWith('25.4') ? '1x1"'
+      : String(row.profile || '').startsWith('19.05') ? '3/4x3/4"' : String(row.profile || '').replace(' sq.', '');
+    const displayRows = rows.flatMap((row) => {
+      const contributors = String(row.partNumber || '').split(/;\s*/).filter(Boolean);
+      const chunks = contributors.length ? Array.from({ length: Math.ceil(contributors.length / 4) }, (_, index) => contributors.slice(index * 4, index * 4 + 4).join('; ')) : [''];
+      return chunks.map((partNumber, index) => ({ ...row, partNumber, continuation: index > 0 }));
+    });
+    let y = 108;
     const tableHeader = () => { let x = 32; doc.fillColor('#59645f').font('Helvetica-Bold').fontSize(6.5); headings.forEach((label, index) => { doc.text(label.toUpperCase(), x, y + 7, { width: widths[index] - 6, characterSpacing: 0.4 }); x += widths[index]; }); doc.strokeColor('#8f9994').lineWidth(0.6).moveTo(28, y + 21).lineTo(764, y + 21).stroke(); y += 22; };
     tableHeader();
-    rows.forEach((row) => {
-      const height = Math.max(31, doc.heightOfString(row.note, { width: widths[5] - 8 }) + 14);
-      if (y + height > 565) { doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 28 }); y = 36; tableHeader(); }
-      const values = [row.item, row.partNumber, `${row.material}\n${row.profile}`, `${row.length.toFixed(2)} mm`, String(row.qty), row.note]; let x = 32;
-      doc.fillColor('#26312d').font('Helvetica').fontSize(8); values.forEach((value, index) => { doc.font(index === 0 || index === 3 || index === 4 ? 'Helvetica-Bold' : 'Helvetica').fontSize(index === 4 ? 11 : index === 1 ? 6.5 : 8).text(value, x, y + 8, { width: widths[index] - 7, align: index === 4 ? 'center' : 'left' }); x += widths[index]; });
+    displayRows.forEach((row) => {
+      const values = [row.continuation ? '' : String(row.qty), row.continuation ? '' : `${Number(row.length).toFixed(2)} mm`, row.continuation ? '' : profileLabel(row), row.continuation ? '' : String(row.note || ''), row.continuation ? `${row.item || 'Tube'} (cont.)` : String(row.item || ''), row.partNumber];
+      const fonts = values.map((_, index) => ({ name: index <= 2 ? 'Helvetica-Bold' : 'Helvetica', size: index === 0 ? 11 : index === 5 ? 6.5 : 8 }));
+      const contentHeight = Math.max(...values.map((value, index) => doc.font(fonts[index].name).fontSize(fonts[index].size).heightOfString(value, { width: widths[index] - 8 })));
+      const height = Math.max(31, Math.min(150, contentHeight + 16));
+      if (y + height > 542) { doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 28 }); y = 36; tableHeader(); }
+      let x = 32;
+      doc.fillColor('#26312d');
+      values.forEach((value, index) => {
+        doc.font(fonts[index].name).fontSize(fonts[index].size).text(value, x, y + 8, {
+          width: widths[index] - 7,
+          height: height - 13,
+          ellipsis: contentHeight + 16 > 150,
+          align: index === 0 ? 'center' : 'left',
+        });
+        x += widths[index];
+      });
       doc.strokeColor('#d9dcd8').lineWidth(0.5).moveTo(28, y + height).lineTo(764, y + height).stroke(); y += height;
     });
     doc.strokeColor('#aeb5b1').moveTo(28, 558).lineTo(764, 558).stroke();
@@ -329,7 +334,7 @@ export function createApprovedPanelCutlistPdf(rows, context = {}) {
     qty: Number(row.qty || 0),
   }));
   if (!cleanRows.length) throw new Error('The approved cutlist snapshot is unavailable.');
-  return pdfBuffer((doc) => renderCutlistPages(doc, cleanRows, context, 1));
+  return pdfBuffer((doc) => renderCutlistPages(doc, cleanRows, context, Math.max(1, Number(context.uniquePanels || 1))));
 }
 
 export function createPanelDrawingsPdf(items) {

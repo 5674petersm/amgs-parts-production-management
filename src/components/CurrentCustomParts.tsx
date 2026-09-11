@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CustomPartForm } from "@/components/CustomPartForm";
 import { CustomPartFilePreview } from "@/components/CustomPartFilePreview";
 import { CopyCustomPartsOrder } from "@/components/CopyCustomPartsOrder";
 import { PanelOrders } from "@/components/PanelOrders";
 import { PartsLibrary } from "@/components/PartsLibrary";
+import { CUSTOM_PART_PROCESS_LABELS, type CustomPartProcess } from "@/constants/custom-part-processes";
 import type { CurrentCustomPart } from "@/types/custom-part";
 
 type SortMode = "order" | "material";
@@ -56,6 +57,16 @@ function groupCustomParts(parts: CurrentCustomPart[]): CustomPartGroup[] {
   });
 }
 
+function formatProcessTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export function CurrentCustomParts({ canManage = false, signedIn = false, initialAddOrder = "", initialAddLine = "", initialAddCustomer = "" }: { canManage?: boolean; signedIn?: boolean; initialAddOrder?: string; initialAddLine?: string; initialAddCustomer?: string }) {
   const [parts, setParts] = useState<CurrentCustomPart[]>([]);
   const [completedParts, setCompletedParts] = useState<CurrentCustomPart[]>([]);
@@ -68,7 +79,7 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<"add" | CurrentCustomPart | null>(initialAddOrder ? "add" : null);
   const [subtab, setSubtab] = useState<"parts" | "completed" | "library" | "panels">("parts");
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [completingPartId, setCompletingPartId] = useState<number | null>(null);
   const [deletingPartId, setDeletingPartId] = useState<number | null>(null);
   const [completionMessage, setCompletionMessage] = useState("");
@@ -78,6 +89,7 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
   const [selectedGroupPartIds, setSelectedGroupPartIds] = useState<number[]>([]);
   const [savingGroup, setSavingGroup] = useState(false);
   const [groupingAvailable, setGroupingAvailable] = useState<boolean | null>(null);
+  const editorRef = useRef<HTMLElement>(null);
 
   const loadParts = useCallback((background = false) => {
     if (!background) setLoading(true);
@@ -136,6 +148,11 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
     const savedView = window.localStorage.getItem("amgs-custom-parts-view");
     if (savedView === "cards" || savedView === "list") setViewMode(savedView);
   }, []);
+  useEffect(() => {
+    if (!editor) return;
+    const frame = window.requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [editor]);
 
   function chooseView(nextView: ViewMode) {
     setViewMode(nextView);
@@ -165,6 +182,26 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
     } finally {
       setCompletingPartId(null);
     }
+  }
+
+  async function setPartProcess(part: CurrentCustomPart, process: CustomPartProcess, checked: boolean) {
+    setCompletingPartId(part.customPartId); setError(""); setCompletionMessage("");
+    try {
+      const response = await fetch(`/api/custom-parts/${part.customPartId}/processes`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ process, checked }),
+      });
+      const result = await response.json() as { completed?: boolean; progress?: CurrentCustomPart; error?: string };
+      if (!response.ok) throw new Error(result.error || "Unable to update this process.");
+      if (result.completed) {
+        setParts((current) => current.filter((item) => item.customPartId !== part.customPartId));
+        setCompletedLoaded(false);
+        setCompletionMessage(`${part.partNumber} completed and moved to Google Drive Completed.`);
+      } else {
+        setParts((current) => current.map((item) => item.customPartId === part.customPartId
+          ? { ...item, processProgress: result.progress?.processProgress || item.processProgress } : item));
+      }
+    } catch (processError) { setError(processError instanceof Error ? processError.message : "Unable to update this process."); }
+    finally { setCompletingPartId(null); }
   }
 
   async function deletePart(part: CurrentCustomPart) {
@@ -226,8 +263,9 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
     return [...suggestions.values()].filter((group) => group.length > 1);
   }, [displayableParts, canManage]);
   const formatCompletedDate = (value: string | null) => value
-    ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value))
+    ? formatProcessTimestamp(value)
     : "";
+  const renderProcesses = (part: CurrentCustomPart) => part.requiredProcesses.length ? <div className="custom-part-process-checks">{part.requiredProcesses.map((process) => { const completedAt = part.processProgress[process] || part.completedAt; return <label key={process}><input type="checkbox" checked={Boolean(completedAt)} disabled={completedView || completingPartId !== null || deletingPartId !== null} onChange={(event) => void setPartProcess(part, process, event.target.checked)} /><span>{CUSTOM_PART_PROCESS_LABELS[process]}{completedAt && <small className="process-completed-at">{formatProcessTimestamp(completedAt)}</small>}</span></label>; })}</div> : !completedView ? <button className="custom-part-complete-button" type="button" disabled={completingPartId !== null || deletingPartId !== null} onClick={() => void completePart(part)}>{completingPartId === part.customPartId ? "Completing…" : "Complete"}</button> : null;
 
   async function saveGroup(customPartIds: number[]) {
     setSavingGroup(true);
@@ -285,7 +323,7 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
         </ul>
       ) : <p className="custom-part-no-files">No drawing files found.</p>}
       <a className="drive-folder-link desktop-drive-link" href={part.folderUrl} target="_blank" rel="noreferrer">Open Google Drive folder</a>
-      {!completedView && <button className="custom-part-complete-button" type="button" disabled={completingPartId !== null || deletingPartId !== null} onClick={() => void completePart(part)}>{completingPartId === part.customPartId ? "Completing…" : "Mark complete"}</button>}
+      {(part.requiredProcesses.length > 0 || !completedView) && renderProcesses(part)}
       {canManage && !completedView && <button className="custom-part-edit-button" type="button" onClick={() => setEditor(part)}>Edit part</button>}
       {canManage && !completedView && <button className="custom-part-delete-button" type="button" disabled={deletingPartId !== null || completingPartId !== null} onClick={() => void deletePart(part)}>{deletingPartId === part.customPartId ? "Deleting…" : "Delete part"}</button>}
     </article>
@@ -302,7 +340,7 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
       <div className="compact-part-actions">
         <button type="button" disabled={!part.files.length} onClick={() => setExpandedFilesPartId((current) => current === part.customPartId ? null : part.customPartId)}>Files {part.files.length}</button>
         <a href={part.folderUrl} target="_blank" rel="noreferrer">Drive</a>
-        {!completedView && <button className="complete" type="button" disabled={completingPartId !== null || deletingPartId !== null} onClick={() => void completePart(part)}>{completingPartId === part.customPartId ? "Saving…" : "Complete"}</button>}
+        {(part.requiredProcesses.length > 0 || !completedView) && renderProcesses(part)}
         {canManage && !completedView && <button type="button" onClick={() => setEditor(part)}>Edit</button>}
         {canManage && !completedView && <button className="delete" type="button" disabled={deletingPartId !== null || completingPartId !== null} onClick={() => void deletePart(part)}>{deletingPartId === part.customPartId ? "Deleting…" : "Delete"}</button>}
       </div>
@@ -317,7 +355,7 @@ export function CurrentCustomParts({ canManage = false, signedIn = false, initia
   if (editor) {
     const editPart = editor === "add" ? null : editor;
     return (
-      <section className="custom-part-editor">
+      <section className="custom-part-editor" ref={editorRef}>
         <div className="floor-page-heading">
           <div><h1>{editPart ? `Edit ${editPart.partNumber}` : "Add Custom Parts"}</h1><p>{editPart ? "Update details, mapping, or add drawing files." : "Keep the order selected while adding multiple supporting parts."}</p></div>
           <button className="order-refresh-button" type="button" onClick={() => setEditor(null)}>Back to list</button>

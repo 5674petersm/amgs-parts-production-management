@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { CUSTOM_PART_MATERIALS } from "@/constants/custom-part-materials";
+import { CUSTOM_PART_PROCESSES, CUSTOM_PART_PROCESS_LABELS, type CustomPartProcess } from "@/constants/custom-part-processes";
 import type {
   CurrentCustomPart,
   CustomPartDraft,
@@ -67,6 +68,7 @@ function PartDetails({ draft }: { draft: CustomPartDraft }) {
         <dt>Mapped order lines</dt>
         <dd>{draft.mappedOrderLineIds.length ? draft.mappedOrderLineIds.join(", ") : "None"}</dd>
       </div>
+      <div><dt>Processes</dt><dd>{draft.requiredProcesses.length ? draft.requiredProcesses.map((process) => CUSTOM_PART_PROCESS_LABELS[process]).join(", ") : "Complete only"}</dd></div>
       {draft.saveToLibrary && <div>
         <dt>Parts Library</dt>
         <dd>Save this part for reuse</dd>
@@ -120,6 +122,7 @@ export function CustomPartForm({
   const [standardColor, setStandardColor] = useState(existingStandardColor(editPart));
   const [customColor, setCustomColor] = useState(editPart?.hasCustomColor ? editPart.customColor : "");
   const [mappedOrderLineIds, setMappedOrderLineIds] = useState<string[]>(editPart?.mappedOrderLineIds || (initialOrderLineId ? [initialOrderLineId] : []));
+  const [requiredProcesses, setRequiredProcesses] = useState<CustomPartProcess[]>(editPart?.requiredProcesses || []);
   const [saveToLibrary, setSaveToLibrary] = useState(false);
   const [sourceLibraryPart, setSourceLibraryPart] = useState<PartLibraryItem | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -287,6 +290,7 @@ export function CustomPartForm({
       setCustomColor("");
     }
     setDrawingFiles([]);
+    setRequiredProcesses(part.requiredProcesses || []);
     setSaveToLibrary(false);
     setLibraryOpen(false);
   }
@@ -345,6 +349,7 @@ export function CustomPartForm({
       saveToLibrary,
       sourceLibraryPartId: sourceLibraryPart?.libraryPartId || null,
       sourceLibraryPartName: sourceLibraryPart?.partName || "",
+      requiredProcesses,
     });
     setReviewing(true);
   }
@@ -369,6 +374,7 @@ export function CustomPartForm({
     formData.append("saveToLibrary", String(draft.saveToLibrary));
     if (draft.sourceLibraryPartId) formData.append("sourceLibraryPartId", String(draft.sourceLibraryPartId));
     draft.mappedOrderLineIds.forEach((lineId) => formData.append("mappedOrderLineIds", lineId));
+    draft.requiredProcesses.forEach((process) => formData.append("requiredProcesses", process));
     for (const file of draft.drawingFiles) {
       formData.append("drawings", file);
     }
@@ -437,6 +443,7 @@ export function CustomPartForm({
     setCustomColor("");
     setDrawingFiles([]);
     setMappedOrderLineIds([]);
+    setRequiredProcesses([]);
     setSaveToLibrary(false);
     setSourceLibraryPart(null);
     setError(null);
@@ -647,6 +654,12 @@ export function CustomPartForm({
               <span>{line.lineNumber ? `Line ${line.lineNumber} · ` : ""}<strong>{line.partNumber}</strong>{line.description ? ` · ${line.description}` : ""}</span>
             </label>
           )) : <p className="hint">Choose a valid order to load its line items.</p>}
+        </fieldset>
+
+        <fieldset className="custom-part-process-picker">
+          <legend>Required processes <span className="field-optional">(optional)</span></legend>
+          <p className="hint field-hint">Choose every fabrication process this part must complete. With none selected, it uses one Complete checkbox.</p>
+          <div>{CUSTOM_PART_PROCESSES.map((process) => <label key={process}><input type="checkbox" checked={requiredProcesses.includes(process)} onChange={(event) => setRequiredProcesses((current) => event.target.checked ? [...current, process] : current.filter((value) => value !== process))} /><span>{CUSTOM_PART_PROCESS_LABELS[process]}</span></label>)}</div>
         </fieldset>
 
         <label className="checkbox-label">

@@ -10,7 +10,8 @@
     "pm2:restart": "npm run build && pm2 startOrReload ecosystem.config.cjs --update-env",
     "pm2:logs": "pm2 logs amgs-production",
     "lint": "next lint",
-    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true}); try{require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})}catch(e){}\""
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true}); try{require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})}catch(e){}\"",
+    "test": "node --experimental-default-type=module --test test/*.test.mjs"
   },
   "dependencies": {
     "dxf-parser": "^1.1.2",

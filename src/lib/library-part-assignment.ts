@@ -1,6 +1,6 @@
 import type { PartLibraryRecord } from "@/lib/custom-part-library";
 import { deleteCustomPart, reserveCustomPartNumber, updateCustomPartDriveInfo } from "@/lib/custom-parts";
-import { copyCustomPartToDrive, trashCustomPartFolder } from "@/lib/google-drive";
+import { copyCustomPartToDrive, copyPartLibraryGroupPdfsToFolder, trashCustomPartFolder } from "@/lib/google-drive";
 import { setCustomPartLineMappings } from "@/lib/shop-floor-orders";
 
 export type AssignedLibraryPart = {
@@ -19,6 +19,7 @@ export async function assignLibraryPartToOrder(input: {
   sourceLibraryGroupId?: number;
   libraryGroupAssignmentId?: string;
   libraryGroupSetQuantity?: number;
+  groupDrawingFolderId?: string;
 }): Promise<AssignedLibraryPart> {
   let customPartId = 0;
   let partFolderId = "";
@@ -32,6 +33,7 @@ export async function assignLibraryPartToOrder(input: {
       sourceLibraryGroupId: input.sourceLibraryGroupId,
       libraryGroupAssignmentId: input.libraryGroupAssignmentId,
       libraryGroupSetQuantity: input.libraryGroupSetQuantity,
+      requiredProcesses: input.libraryPart.requiredProcesses,
     });
     customPartId = reserved.customPartId;
     const drive = await copyCustomPartToDrive({
@@ -43,6 +45,9 @@ export async function assignLibraryPartToOrder(input: {
       submittedBy: input.submittedBy,
     });
     partFolderId = drive.partFolderId;
+    if (input.groupDrawingFolderId) {
+      await copyPartLibraryGroupPdfsToFolder(input.groupDrawingFolderId, drive.partFolderId);
+    }
     await updateCustomPartDriveInfo(customPartId, drive);
     await setCustomPartLineMappings({
       customPartId, orderNumber: input.orderNumber, orderLineIds: input.mappedOrderLineIds,

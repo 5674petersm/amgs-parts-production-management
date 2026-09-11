@@ -70,6 +70,7 @@ export async function propagateAddedGroupMembers(input: {
           sourceLibraryGroupId: input.group.libraryGroupId,
           libraryGroupAssignmentId: assignmentId,
           libraryGroupSetQuantity: first.libraryGroupSetQuantity,
+          groupDrawingFolderId: input.group.driveFolderId,
         }));
       }
       result.assignmentsUpdated += 1;

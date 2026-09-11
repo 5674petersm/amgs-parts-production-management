@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { PDFDocument } from "pdf-lib";
 
 import { createApprovedPanelCutlistPdf, createApprovedPanelDrawingPdf } from "@/lib/panel-documents";
+import { consolidateApprovedRows } from "@/lib/panel-cutlist";
 import { getPanelDocumentAssignments, getUploadedPanelDocument } from "@/lib/shop-floor-orders";
 import type { ShopFloorPanelDocument } from "@/types/shop-floor-order";
 
@@ -16,24 +17,6 @@ async function mergePdfs(pdfs: Array<Buffer | ArrayBuffer>) {
     pages.forEach((page) => output.addPage(page));
   }
   return Buffer.from(await output.save());
-}
-
-function consolidateApprovedRows(documents: ShopFloorPanelDocument[]) {
-  const grouped = new Map<string, Record<string, unknown> & { qty: number; partNumber: string }>();
-  for (const document of documents) {
-    const rows = JSON.parse(document.cutlistJson || "[]") as Array<Record<string, unknown>>;
-    for (const row of rows) {
-      const key = [row.material, row.profile, Number(row.length || 0).toFixed(3), row.note].join("|");
-      const existing = grouped.get(key);
-      if (existing) {
-        existing.qty += Number(row.qty || 0);
-        if (!existing.partNumber.includes(document.partNumber)) existing.partNumber += `, ${document.partNumber}`;
-      } else {
-        grouped.set(key, { ...row, qty: Number(row.qty || 0), partNumber: document.partNumber });
-      }
-    }
-  }
-  return [...grouped.values()].map((row, index) => ({ ...row, item: `P-${String(index + 1).padStart(2, "0")}` }));
 }
 
 export async function POST(request: Request) {
@@ -54,7 +37,7 @@ export async function POST(request: Request) {
       const generated = documents.filter((document) => document.cutlistMode === "generated");
       if (generated.length) {
         const orders = [...new Set(generated.map((document) => document.orderNumber))];
-        pdfs.push(await createApprovedPanelCutlistPdf(consolidateApprovedRows(generated), { customer: `${orders.length} selected order${orders.length === 1 ? "" : "s"}`, order: orders.join(", ") }));
+        pdfs.push(await createApprovedPanelCutlistPdf(consolidateApprovedRows(generated), { customer: `${orders.length} selected order${orders.length === 1 ? "" : "s"}`, order: orders.join(", "), uniquePanels: generated.length }));
       }
       for (const document of documents.filter((item) => item.cutlistMode === "uploaded")) {
         pdfs.push((await getUploadedPanelDocument(document.orderNumber, document.orderLineId, "cutlist")).bytes);

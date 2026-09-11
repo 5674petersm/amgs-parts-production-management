@@ -8,6 +8,7 @@ import {
 } from "@/lib/sql-request";
 import { plantLocalTimestampForSql } from "@/lib/time";
 import type { CurrentCustomPart, CustomPartListItem } from "@/types/custom-part";
+import { CUSTOM_PART_PROCESSES, parseCustomPartProcesses, serializeCustomPartProcesses, type CustomPartProcess } from "@/constants/custom-part-processes";
 
 export type CustomPartOrderLookup = {
   amgsOrderNumber: string;
@@ -32,6 +33,7 @@ export type CustomPartRecordInput = {
   sourceLibraryGroupId?: number | null;
   libraryGroupAssignmentId?: string | null;
   libraryGroupSetQuantity?: number | null;
+  requiredProcesses?: CustomPartProcess[];
 };
 
 export type ReservedCustomPart = {
@@ -53,7 +55,35 @@ export type CopyableCustomPartRecord = {
   partFolderId: string;
   completedAt: string | null;
   groupId: string | null;
+  requiredProcesses: CustomPartProcess[];
 };
+
+type CustomPartProcessColumns = {
+  RequiredProcesses: string | null;
+  CutCompletedAt: Date | null;
+  WeldCompletedAt: Date | null;
+  MeshCompletedAt: Date | null;
+  CncCompletedAt: Date | null;
+  BendCompletedAt: Date | null;
+};
+
+const PROCESS_DATE_COLUMNS: Record<CustomPartProcess, keyof CustomPartProcessColumns> = {
+  cut: "CutCompletedAt", weld: "WeldCompletedAt", mesh: "MeshCompletedAt",
+  cnc: "CncCompletedAt", bend: "BendCompletedAt",
+};
+
+function processProgress(row: CustomPartProcessColumns): Partial<Record<CustomPartProcess, string>> {
+  return Object.fromEntries(CUSTOM_PART_PROCESSES.flatMap((process) => {
+    const date = row[PROCESS_DATE_COLUMNS[process]] as Date | null;
+    return date ? [[process, date.toISOString()]] : [];
+  }));
+}
+
+function processSelect(available: boolean) {
+  return available
+    ? "RequiredProcesses, CutCompletedAt, WeldCompletedAt, MeshCompletedAt, CncCompletedAt, BendCompletedAt"
+    : "NULL AS RequiredProcesses, NULL AS CutCompletedAt, NULL AS WeldCompletedAt, NULL AS MeshCompletedAt, NULL AS CncCompletedAt, NULL AS BendCompletedAt";
+}
 
 export function formatCustomPartNumber(
   amgsOrderNumber: string,
@@ -70,6 +100,20 @@ export async function customPartGroupsAvailable(): Promise<boolean> {
   const pool = await getPool();
   const result = await pool.request().query<{ Available: number }>(`
     SELECT CASE WHEN COL_LENGTH(N'dbo.tblcustomparts', N'CustomPartGroupID') IS NULL THEN 0 ELSE 1 END AS Available
+  `);
+  return Boolean(result.recordset[0]?.Available);
+}
+
+export async function customPartProcessesAvailable(): Promise<boolean> {
+  const pool = await getPool();
+  const result = await pool.request().query<{ Available: number }>(`
+    SELECT CASE WHEN COL_LENGTH(N'dbo.tblcustomparts', N'RequiredProcesses') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustomparts', N'CutCompletedAt') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustomparts', N'WeldCompletedAt') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustomparts', N'MeshCompletedAt') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustomparts', N'CncCompletedAt') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustomparts', N'BendCompletedAt') IS NOT NULL
+      THEN 1 ELSE 0 END AS Available
   `);
   return Boolean(result.recordset[0]?.Available);
 }
@@ -170,6 +214,7 @@ export async function listCustomPartOrders(): Promise<string[]> {
 export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]> {
   const pool = await getPool();
   const groupingAvailable = await customPartGroupsAvailable();
+  const processesAvailable = await customPartProcessesAvailable();
   const result = await pool.request().query<{
     CustomPartID: number;
     AMGSOrderNumber: string;
@@ -183,7 +228,7 @@ export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]
     GoogleDriveFolderUrl: string;
     GoogleDrivePartFolderId: string;
     CustomPartGroupID: string | null;
-  }>(`
+  } & CustomPartProcessColumns>(`
     SELECT
       CustomPartID,
       AMGSOrderNumber,
@@ -196,7 +241,8 @@ export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]
       CustomColor,
       GoogleDriveFolderUrl,
       GoogleDrivePartFolderId,
-      ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"}
+      ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"},
+      ${processSelect(processesAvailable)}
     FROM dbo.tblcustomparts
     WHERE CompletedAt IS NULL
       AND NULLIF(LTRIM(RTRIM(GoogleDrivePartFolderId)), N'') IS NOT NULL
@@ -224,12 +270,15 @@ export async function listCurrentDriveCustomParts(): Promise<CurrentCustomPart[]
     cut: false,
     completedAt: null,
     groupId: row.CustomPartGroupID ? String(row.CustomPartGroupID) : null,
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
+    processProgress: processProgress(row),
   }));
 }
 
 export async function listCompletedDriveCustomParts(): Promise<CurrentCustomPart[]> {
   const pool = await getPool();
   const groupingAvailable = await customPartGroupsAvailable();
+  const processesAvailable = await customPartProcessesAvailable();
   const result = await pool.request().query<{
     CustomPartID: number;
     AMGSOrderNumber: string;
@@ -244,7 +293,7 @@ export async function listCompletedDriveCustomParts(): Promise<CurrentCustomPart
     GoogleDrivePartFolderId: string;
     CompletedAt: Date;
     CustomPartGroupID: string | null;
-  }>(`
+  } & CustomPartProcessColumns>(`
     SELECT
       CustomPartID,
       AMGSOrderNumber,
@@ -258,7 +307,8 @@ export async function listCompletedDriveCustomParts(): Promise<CurrentCustomPart
       GoogleDriveFolderUrl,
       GoogleDrivePartFolderId,
       CompletedAt,
-      ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"}
+      ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"},
+      ${processSelect(processesAvailable)}
     FROM dbo.tblcustomparts
     WHERE CompletedAt IS NOT NULL
       AND NULLIF(LTRIM(RTRIM(GoogleDrivePartFolderId)), N'') IS NOT NULL
@@ -286,6 +336,8 @@ export async function listCompletedDriveCustomParts(): Promise<CurrentCustomPart
     cut: false,
     completedAt: row.CompletedAt.toISOString(),
     groupId: row.CustomPartGroupID ? String(row.CustomPartGroupID) : null,
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
+    processProgress: processProgress(row),
   }));
 }
 
@@ -311,7 +363,7 @@ export async function listCustomPartsByOrder(
     Material: string;
     CompletedAt: Date | null;
     CustomPartGroupID: string | null;
-  }>(`
+  } & CustomPartProcessColumns>(`
     SELECT
       CustomPartID,
       AMGSOrderNumber,
@@ -347,6 +399,7 @@ export async function listCopyableCustomPartsByOrder(
 
   const pool = await getPool();
   const groupingAvailable = await customPartGroupsAvailable();
+  const processesAvailable = await customPartProcessesAvailable();
   const request = pool.request();
   bindNVarChar(request, "orderNumber", order, 50);
   const result = await request.query<{
@@ -362,10 +415,11 @@ export async function listCopyableCustomPartsByOrder(
     GoogleDrivePartFolderId: string | null;
     CompletedAt: Date | null;
     CustomPartGroupID: string | null;
-  }>(`
+  } & CustomPartProcessColumns>(`
     SELECT CustomPartID, AMGSOrderNumber, CustomerName, PartNumber,
       Description, QtyNeeded, Material, HasCustomColor, CustomColor,
-      GoogleDrivePartFolderId, CompletedAt, ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"}
+      GoogleDrivePartFolderId, CompletedAt, ${groupingAvailable ? "CustomPartGroupID" : "NULL AS CustomPartGroupID"},
+      ${processSelect(processesAvailable)}
     FROM dbo.tblcustomparts
     WHERE AMGSOrderNumber = @orderNumber
     ORDER BY PartSequence ASC
@@ -384,6 +438,7 @@ export async function listCopyableCustomPartsByOrder(
     partFolderId: row.GoogleDrivePartFolderId?.trim() || "",
     completedAt: row.CompletedAt ? row.CompletedAt.toISOString() : null,
     groupId: row.CustomPartGroupID ? String(row.CustomPartGroupID) : null,
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
   }));
 }
 
@@ -395,6 +450,8 @@ export type CustomPartDriveFolder = {
   folderId: string;
   folderUrl: string;
   mappedOrderLineIds: string[];
+  requiredProcesses: CustomPartProcess[];
+  processProgress: Partial<Record<CustomPartProcess, string>>;
 };
 
 export async function listCustomPartDriveFoldersByOrder(
@@ -406,6 +463,7 @@ export async function listCustomPartDriveFoldersByOrder(
   }
 
   const pool = await getPool();
+  const processesAvailable = await customPartProcessesAvailable();
   const request = pool.request();
   bindNVarChar(request, "orderNumber", order, 50);
   const result = await request.query<{
@@ -415,14 +473,15 @@ export async function listCustomPartDriveFoldersByOrder(
     CompletedAt: Date | null;
     GoogleDrivePartFolderId: string | null;
     GoogleDriveFolderUrl: string | null;
-  }>(`
+  } & CustomPartProcessColumns>(`
     SELECT
       CustomPartID,
       PartNumber,
       Description,
       CompletedAt,
       GoogleDrivePartFolderId,
-      GoogleDriveFolderUrl
+      GoogleDriveFolderUrl,
+      ${processSelect(processesAvailable)}
     FROM dbo.tblcustomparts
     WHERE AMGSOrderNumber = @orderNumber
       AND NULLIF(LTRIM(RTRIM(GoogleDrivePartFolderId)), N'') IS NOT NULL
@@ -437,6 +496,8 @@ export async function listCustomPartDriveFoldersByOrder(
     folderId: row.GoogleDrivePartFolderId?.trim() || "",
     folderUrl: row.GoogleDriveFolderUrl?.trim() || "",
     mappedOrderLineIds: [],
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
+    processProgress: processProgress(row),
   }));
 }
 
@@ -489,6 +550,10 @@ export async function reserveCustomPartNumber(
   const order = normalizeOrderNumber(input.amgsOrderNumber);
   const trackLibraryGroup = Boolean(input.sourceLibraryGroupId && input.libraryGroupAssignmentId
     && input.libraryGroupSetQuantity && await libraryGroupAssignmentTrackingAvailable());
+  const processesAvailable = await customPartProcessesAvailable();
+  if (input.requiredProcesses?.length && !processesAvailable) {
+    throw new Error("Custom part processes are awaiting their database migration.");
+  }
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -520,6 +585,7 @@ export async function reserveCustomPartNumber(
     bindNVarChar(insertRequest, "customColor", input.customColor, 100);
     bindNVarChar(insertRequest, "submittedBy", input.submittedBy, 256);
     bindDateTime2(insertRequest, "submittedAt", submittedAt);
+    if (processesAvailable) bindNVarChar(insertRequest, "requiredProcesses", serializeCustomPartProcesses(input.requiredProcesses || []), 100);
     insertRequest.input("groupId", sql.UniqueIdentifier, input.groupId || null);
     if (input.sourceLibraryPartId) {
       bindInt(insertRequest, "sourceLibraryPartId", input.sourceLibraryPartId);
@@ -546,6 +612,7 @@ export async function reserveCustomPartNumber(
         ${input.groupId ? ", CustomPartGroupID" : ""}
         ${input.sourceLibraryPartId ? ", SourceLibraryPartID" : ""}
         ${trackLibraryGroup ? ", SourceLibraryGroupID, LibraryGroupAssignmentID, LibraryGroupSetQuantity" : ""}
+        ${processesAvailable ? ", RequiredProcesses" : ""}
       )
       OUTPUT INSERTED.CustomPartID
       VALUES (
@@ -563,6 +630,7 @@ export async function reserveCustomPartNumber(
         ${input.groupId ? ", @groupId" : ""}
         ${input.sourceLibraryPartId ? ", @sourceLibraryPartId" : ""}
         ${trackLibraryGroup ? ", @sourceLibraryGroupId, @libraryGroupAssignmentId, @libraryGroupSetQuantity" : ""}
+        ${processesAvailable ? ", NULLIF(@requiredProcesses, N'')" : ""}
       )
     `);
 
@@ -608,7 +676,7 @@ export async function updateCustomPartDriveInfo(
 export async function updateCustomPartDetails(
   customPartId: number,
   input: Pick<CustomPartRecordInput,
-    "customerName" | "description" | "qtyNeeded" | "material" | "hasCustomColor" | "customColor"
+    "customerName" | "description" | "qtyNeeded" | "material" | "hasCustomColor" | "customColor" | "requiredProcesses"
   >,
 ): Promise<void> {
   const pool = await getPool();
@@ -620,6 +688,11 @@ export async function updateCustomPartDetails(
   bindNVarChar(request, "material", input.material, 50);
   request.input("hasCustomColor", input.hasCustomColor ? 1 : 0);
   bindNVarChar(request, "customColor", input.customColor, 100);
+  const processesAvailable = await customPartProcessesAvailable();
+  if (input.requiredProcesses?.length && !processesAvailable) {
+    throw new Error("Custom part processes are awaiting their database migration.");
+  }
+  if (processesAvailable) bindNVarChar(request, "requiredProcesses", serializeCustomPartProcesses(input.requiredProcesses || []), 100);
   await request.query(`
     UPDATE dbo.tblcustomparts
     SET CustomerName = @customerName,
@@ -628,6 +701,7 @@ export async function updateCustomPartDetails(
         Material = @material,
         HasCustomColor = @hasCustomColor,
         CustomColor = NULLIF(@customColor, N'')
+        ${processesAvailable ? ", RequiredProcesses = NULLIF(@requiredProcesses, N'')" : ""}
     WHERE CustomPartID = @customPartId
   `);
 }
@@ -642,6 +716,64 @@ export async function getCustomPartDriveFolderId(customPartId: number): Promise<
     WHERE CustomPartID = @customPartId
   `);
   return result.recordset[0]?.GoogleDrivePartFolderId?.trim() || "";
+}
+
+export type CustomPartProcessTarget = {
+  customPartId: number;
+  orderNumber: string;
+  partNumber: string;
+  requiredProcesses: CustomPartProcess[];
+  processProgress: Partial<Record<CustomPartProcess, string>>;
+  completedAt: string | null;
+};
+
+export async function getCustomPartProcessTarget(customPartId: number): Promise<CustomPartProcessTarget | null> {
+  if (!(await customPartProcessesAvailable())) throw new Error("Custom part processes are awaiting their database migration.");
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "customPartId", customPartId);
+  const result = await request.query<({
+    CustomPartID: number; AMGSOrderNumber: string; PartNumber: string; CompletedAt: Date | null;
+  } & CustomPartProcessColumns)>(`SELECT CustomPartID, AMGSOrderNumber, PartNumber, CompletedAt,
+      ${processSelect(true)}
+    FROM dbo.tblcustomparts WHERE CustomPartID=@customPartId`);
+  const row = result.recordset[0];
+  return row ? {
+    customPartId: Number(row.CustomPartID), orderNumber: row.AMGSOrderNumber.trim(), partNumber: row.PartNumber.trim(),
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses), processProgress: processProgress(row),
+    completedAt: row.CompletedAt ? row.CompletedAt.toISOString() : null,
+  } : null;
+}
+
+export async function setCustomPartProcessCompletion(input: {
+  customPartId: number; process: CustomPartProcess; checked: boolean;
+}): Promise<CustomPartProcessTarget> {
+  const target = await getCustomPartProcessTarget(input.customPartId);
+  if (!target) throw new Error("Custom part not found.");
+  if (target.completedAt && !input.checked) throw new Error("Completed custom parts cannot be reopened here.");
+  if (!target.requiredProcesses.includes(input.process)) throw new Error("This process is not required for the custom part.");
+  const column = PROCESS_DATE_COLUMNS[input.process];
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "customPartId", input.customPartId);
+  bindDateTime2(request, "completedAt", plantLocalTimestampForSql());
+  await request.query(`UPDATE dbo.tblcustomparts SET ${column}=${input.checked ? "@completedAt" : "NULL"}
+    WHERE CustomPartID=@customPartId`);
+  const updated = await getCustomPartProcessTarget(input.customPartId);
+  if (!updated) throw new Error("Custom part not found.");
+  return updated;
+}
+
+export async function markRequiredCustomPartProcessesComplete(customPartId: number): Promise<void> {
+  const target = await getCustomPartProcessTarget(customPartId);
+  if (!target) throw new Error("Custom part not found.");
+  if (!target.requiredProcesses.length) return;
+  const assignments = target.requiredProcesses.map((process) => `${PROCESS_DATE_COLUMNS[process]}=COALESCE(${PROCESS_DATE_COLUMNS[process]}, @completedAt)`);
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "customPartId", customPartId);
+  bindDateTime2(request, "completedAt", plantLocalTimestampForSql());
+  await request.query(`UPDATE dbo.tblcustomparts SET ${assignments.join(", ")} WHERE CustomPartID=@customPartId`);
 }
 
 export type CustomPartCompletionTarget = {

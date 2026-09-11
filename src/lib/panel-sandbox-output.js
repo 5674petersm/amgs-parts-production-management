@@ -70,9 +70,14 @@ function stilePieces(panel) {
 }
 
 function tapLocations(panel) {
-  const top = panel.fitting === 'A' ? 300 : 100; const bottom = panel.height - (panel.fitting === 'A' ? 298 : 98);
-  const candidates = [top, top + 13, top + 26, bottom, bottom + 26];
+  const candidates = panelTapLocations(panel).map((hole) => hole.panelY);
   return candidates.filter((y, index) => y >= 0 && y <= panel.height && candidates.findIndex((other) => Math.abs(other - y) < 0.01) === index);
+}
+
+function panelTapLocations(panel) {
+  const top = panel.fitting === 'A' ? 300 : 100; const bottomOffset = panel.fitting === 'A' ? 298 : 98;
+  return [top, top + 13, top + 26, panel.height - bottomOffset, panel.height - bottomOffset + 26]
+    .map((panelY, index) => ({ panelY, datum: index < 3 ? 'top' : 'bottom' }));
 }
 
 function fittingConflicts(panel) {
@@ -83,40 +88,55 @@ function fittingConflicts(panel) {
   return conflicts;
 }
 
-function segmentTapLocations(panel, piece) {
+function segmentTapDetails(panel, piece) {
   const end = piece.y + piece.length;
-  return tapLocations(panel).filter((y) => y >= piece.y && (y < end || end === panel.height)).map((y) => y - piece.y);
+  const details = panelTapLocations(panel).filter((hole) => hole.panelY >= piece.y && (hole.panelY < end || end === panel.height))
+    .map((hole) => ({ ...hole, localY: hole.panelY - piece.y, diameter: 4 }));
+  const topHoles = details.filter((hole) => hole.datum === 'top').sort((left, right) => left.panelY - right.panelY);
+  if (topHoles[1]) topHoles[1].diameter = 9;
+  return details.sort((left, right) => left.panelY - right.panelY);
 }
 
 function cutlist(panel) {
   const railPieces = horizontalRailPieces(panel); const verticals = cutoutVerticals(panel); const rows = []; const pieces = stilePieces(panel); const conflicts = fittingConflicts(panel); const stileGroups = new Map();
-  pieces.forEach((piece) => { const localTaps = segmentTapLocations(panel, piece); const manual = conflicts[piece.side].length > 0; const note = `${localTaps.length ? `Drill/tap local Y ${localTaps.map((y) => y.toFixed(1)).join(', ')}` : 'No drilling'}${manual ? ' · MANUAL FITTING INPUT REQUIRED' : ''}`; const key = `${piece.length.toFixed(3)}|${note}`; const existing = stileGroups.get(key); if (existing) { existing.qty += 1; existing.sides.push(piece.side); } else stileGroups.set(key, { kind: 'stile', item: 'ST', material: 'Mild steel tube', profile: '25.4 × 25.4 sq.', length: piece.length, qty: 1, operationKey: note, note, sides: [piece.side] }); });
-  [...stileGroups.values()].forEach((row, index) => rows.push({ ...row, item: `ST-${String(index + 1).padStart(2, '0')}`, note: `${[...new Set(row.sides)].join(' + ')} stile${row.qty > 1 ? 's' : ''} · ${row.note}` }));
-  const railGroups = new Map(); railPieces.forEach((piece) => { const key = piece.length.toFixed(3); const description = `${piece.name}${piece.segment === 'full' ? '' : ` · ${piece.segment} segment`}`; if (!railGroups.has(key)) railGroups.set(key, { kind: 'rail', item: 'RL', material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: piece.length, qty: 0, descriptions: new Set() }); const group = railGroups.get(key); group.qty += 1; group.descriptions.add(description); });
-  [...railGroups.values()].forEach((row, index) => rows.push({ ...row, item: `RL-${String(index + 1).padStart(2, '0')}`, note: `Horizontal rail${row.qty > 1 ? 's' : ''} · ${[...row.descriptions].join('; ')}` }));
-  if (verticals.length) rows.push({ kind: 'cutout-vertical', item: 'CV-01', material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: verticals[0].length, qty: verticals.length, note: `${verticals.map((item) => item.edge).join(' + ')} cutout vertical${verticals.length > 1 ? 's' : ''} · fit between horizontal rails` });
+  const pieceLabel = (piece) => { const sidePieces = pieces.filter((candidate) => candidate.side === piece.side); const segment = sidePieces.length > 1 ? (piece.y === 0 ? ' · top' : ' · bottom') : ''; return `${piece.side === 'left' ? 'Left' : 'Right'} stile${segment}`; };
+  const combinedStileLabel = (labels) => { const unique = [...new Set(labels)]; return unique.some((label) => label.startsWith('Left stile')) && unique.some((label) => label.startsWith('Right stile')) ? 'Both stiles' : unique.join(' + '); };
+  pieces.forEach((piece) => {
+    const details = segmentTapDetails(panel, piece); const manual = conflicts[piece.side].length > 0;
+    const dimensions = details.map((hole) => `${hole.localY.toFixed(1)}${hole.diameter === 9 ? ' Ø9' : ''}`).join(', ');
+    const note = `${dimensions}${manual ? `${dimensions ? ' · ' : ''}MANUAL INPUT REQUIRED` : ''}`; const key = `${piece.length.toFixed(3)}|${note}`; const existing = stileGroups.get(key);
+    if (existing) { existing.qty += 1; existing.labels.push(pieceLabel(piece)); }
+    else stileGroups.set(key, { kind: 'stile', item: 'Stile', material: 'Mild steel tube', profile: '25.4 × 25.4 sq.', length: piece.length, qty: 1, operationKey: note, note, labels: [pieceLabel(piece)] });
+  });
+  [...stileGroups.values()].forEach((row) => rows.push({ ...row, item: combinedStileLabel(row.labels) }));
+  const railGroups = new Map(); railPieces.forEach((piece) => { const key = piece.length.toFixed(3); const description = `${piece.name}${piece.segment === 'full' ? '' : ` · ${piece.segment}`}`; if (!railGroups.has(key)) railGroups.set(key, { kind: 'rail', item: 'RL', material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: piece.length, qty: 0, descriptions: new Set() }); const group = railGroups.get(key); group.qty += 1; group.descriptions.add(description); });
+  [...railGroups.values()].forEach((row) => rows.push({ ...row, item: [...row.descriptions].join(' / '), note: '' }));
+  if (verticals.length) rows.push({ kind: 'cutout-vertical', item: `${verticals.map((item) => `${item.edge[0].toUpperCase()}${item.edge.slice(1)}`).join(' + ')} cutout vertical${verticals.length > 1 ? 's' : ''}`, material: 'Mild steel tube', profile: '19.05 × 19.05 sq.', length: verticals[0].length, qty: verticals.length, note: 'Fit between horizontal rails' });
   return rows;
 }
 
 export function sandboxPanelCutlist(panel, quantity) {
-  return cutlist(panel).map((row) => ({ ...row, partNumber: `${panel.partNumber} ×${row.qty * quantity}`, qty: row.qty * quantity, note: row.kind === 'rail' ? 'Horizontal rails · consolidated job quantity' : row.note }));
+  return cutlist(panel).map((row) => ({ ...row, partNumber: `${panel.partNumber} ×${row.qty * quantity}`, qty: row.qty * quantity }));
 }
 
 export function sandboxConsolidatedCutlist(items) {
   const groups = new Map();
   items.forEach(({ panel, quantity }) => cutlist(panel).forEach((row) => {
-    const noteKey = row.kind === 'stile' ? (row.operationKey || row.note) : '';
-    const key = [row.kind, row.material, row.profile, row.length, noteKey].join('|');
+    const itemKey = row.kind === 'stile' ? '' : row.item;
+    const key = [row.kind, itemKey, row.material, row.profile, row.length, row.note].join('|');
     const itemQuantity = row.qty * quantity;
-    if (!groups.has(key)) groups.set(key, { ...row, qty: 0, parts: new Map(), notes: new Set() });
-    const group = groups.get(key); group.qty += itemQuantity; group.parts.set(panel.partNumber, (group.parts.get(panel.partNumber) || 0) + itemQuantity); group.notes.add(row.note);
+    if (!groups.has(key)) groups.set(key, { ...row, qty: 0, parts: new Map(), notes: new Set(), items: new Set() });
+    const group = groups.get(key); group.qty += itemQuantity; group.parts.set(panel.partNumber, (group.parts.get(panel.partNumber) || 0) + itemQuantity); group.notes.add(row.note); group.items.add(row.item);
   }));
-  return [...groups.values()].map((row, index) => ({
-    ...row,
-    item: `${row.kind === 'stile' ? 'ST' : row.kind === 'rail' ? 'RL' : 'CV'}-${String(index + 1).padStart(2, '0')}`,
-    partNumber: [...row.parts.entries()].map(([part, quantity]) => `${part} ×${quantity}`).join('; '),
-    note: row.kind === 'rail' ? 'Horizontal rails · consolidated job quantity' : row.kind === 'stile' ? row.note : [...row.notes].join('; '),
-  }));
+  const profileOrder = (profile) => String(profile || '').startsWith('25.4') ? 0 : String(profile || '').startsWith('19.05') ? 1 : 2;
+  return [...groups.values()].map((row) => {
+    const items = [...row.items]; const names = items.join(' ');
+    const item = row.kind === 'stile' && (names.includes('Both stiles') || (names.includes('Left stile') && names.includes('Right stile'))) ? 'Both stiles' : items.join(' / ') || 'Tube';
+    return { ...row, item, partNumber: [...row.parts.entries()].map(([part, quantity]) => `${part} ×${quantity}`).join('; '), note: [...row.notes].join('; ') };
+  }).sort((left, right) => profileOrder(left.profile) - profileOrder(right.profile)
+    || String(left.profile || '').localeCompare(String(right.profile || ''))
+    || Number(left.length || 0) - Number(right.length || 0)
+    || String(left.item || '').localeCompare(String(right.item || '')));
 }
 
 function segmentedSideViewSvg(panel) {

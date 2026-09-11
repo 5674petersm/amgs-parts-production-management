@@ -3,11 +3,12 @@ import { NextResponse } from "next/server";
 import { isCustomPartMaterial } from "@/constants/custom-part-materials";
 import { CUSTOM_PART_MAX_FILE_BYTES, CUSTOM_PART_MAX_FILES, isAllowedDrawingFile } from "@/constants/custom-part-upload";
 import { requireAuthOrShopFloor } from "@/lib/api-auth";
-import { addPartLibraryItemToGroup, createPartLibraryItem, getPartLibraryGroup, getPartLibraryItem, listPartLibrary, listPartLibraryGroups, partLibraryAvailable, partLibraryCanUpdate, partLibraryGroupsAvailable, updatePartLibraryItem } from "@/lib/custom-part-library";
+import { addPartLibraryItemToGroup, createPartLibraryItem, getPartLibraryGroup, getPartLibraryItem, listPartLibrary, listPartLibraryGroups, partLibraryAvailable, partLibraryCanUpdate, partLibraryGroupFilesAvailable, partLibraryGroupsAvailable, updatePartLibraryItem } from "@/lib/custom-part-library";
 import { libraryGroupAssignmentTrackingAvailable, listActiveLibraryPartCopies } from "@/lib/custom-parts";
 import { listCustomPartFilesInFolder, trashCustomPartFolder, updatePartLibraryFiles, uploadPartLibraryFiles } from "@/lib/google-drive";
 import { propagateAddedGroupMembers } from "@/lib/library-group-propagation";
 import { getShopFloorOrders } from "@/lib/shop-floor-orders";
+import { normalizeCustomPartProcesses } from "@/constants/custom-part-processes";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -18,11 +19,12 @@ export async function GET(request: Request) {
   try {
     const available = await partLibraryAvailable();
     const groupsAvailable = await partLibraryGroupsAvailable();
-    const [items, groups, canEdit, groupSyncAvailable] = await Promise.all([
+    const [items, groupRecords, canEdit, groupSyncAvailable, groupFilesAvailable] = await Promise.all([
       available ? listPartLibrary() : [],
       groupsAvailable ? listPartLibraryGroups() : [],
       available ? partLibraryCanUpdate() : false,
       libraryGroupAssignmentTrackingAvailable(),
+      partLibraryGroupFilesAvailable(),
     ]);
     const parts = await Promise.all(items.map(async (item) => ({
       libraryPartId: item.libraryPartId,
@@ -34,9 +36,14 @@ export async function GET(request: Request) {
       folderUrl: item.folderUrl,
       createdBy: item.createdBy,
       createdAt: item.createdAt,
+      requiredProcesses: item.requiredProcesses,
       files: await listCustomPartFilesInFolder(item.driveFolderId).catch(() => []),
     })));
-    return NextResponse.json({ parts, groups, available, groupsAvailable, canEdit, groupSyncAvailable });
+    const groups = await Promise.all(groupRecords.map(async (group) => ({
+      ...group,
+      files: group.driveFolderId ? await listCustomPartFilesInFolder(group.driveFolderId).catch(() => []) : [],
+    })));
+    return NextResponse.json({ parts, groups, available, groupsAvailable, canEdit, groupSyncAvailable, groupFilesAvailable });
   } catch (error) {
     console.error("GET /api/custom-parts/library", error);
     return NextResponse.json({ error: "Unable to load the Parts Library." }, { status: 500 });
@@ -60,6 +67,7 @@ export async function POST(request: Request) {
   const files = formData.getAll("drawings").filter((value): value is File => value instanceof File && value.size > 0);
   const libraryGroupId = Number(formData.get("libraryGroupId") || 0);
   const qtyPerSet = Number(formData.get("qtyPerSet") || 1);
+  const requiredProcesses = normalizeCustomPartProcesses(formData.getAll("requiredProcesses"));
   if (!partName || !description || !isCustomPartMaterial(material)) {
     return NextResponse.json({ error: "Name, description, and a valid material are required." }, { status: 400 });
   }
@@ -87,6 +95,7 @@ export async function POST(request: Request) {
     const libraryPartId = await createPartLibraryItem({
       partName, description, material, hasCustomColor, color,
       driveFolderId: drive.partFolderId, folderUrl: drive.folderUrl, createdBy: authResult.email,
+      requiredProcesses,
     });
     let propagation = null;
     if (Number.isInteger(libraryGroupId) && libraryGroupId > 0) {
@@ -132,6 +141,7 @@ export async function PATCH(request: Request) {
   const color = hasCustomColor ? customColor : standardColor;
   const files = formData.getAll("drawings").filter((value): value is File => value instanceof File && value.size > 0);
   const removeFileIds = [...new Set(formData.getAll("removeFileIds").map(String).filter(Boolean))];
+  const requiredProcesses = normalizeCustomPartProcesses(formData.getAll("requiredProcesses"));
   if (!Number.isInteger(libraryPartId) || libraryPartId <= 0 || !partName || !description || !isCustomPartMaterial(material)) {
     return NextResponse.json({ error: "Name, description, and a valid material are required." }, { status: 400 });
   }
@@ -163,7 +173,7 @@ export async function PATCH(request: Request) {
       folderId: libraryPart.driveFolderId, partName, description, material, hasCustomColor,
       customColor: color, submittedBy: authResult.email, files: buffers, removeFileIds,
     });
-    if (!(await updatePartLibraryItem({ libraryPartId, partName, description, material, hasCustomColor, color }))) {
+    if (!(await updatePartLibraryItem({ libraryPartId, partName, description, material, hasCustomColor, color, requiredProcesses }))) {
       return NextResponse.json({ error: "Library part not found." }, { status: 404 });
     }
     const [copies, orders] = await Promise.all([

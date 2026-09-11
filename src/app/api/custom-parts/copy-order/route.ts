@@ -120,6 +120,7 @@ export async function POST(request: Request) {
         customColor: source.customColor,
         submittedBy: authResult.email,
         groupId: source.groupId,
+        requiredProcesses: source.requiredProcesses,
       });
       created.push({ customPartId: reserved.customPartId, partFolderId: "" });
       const drive = await copyCustomPartToDrive({

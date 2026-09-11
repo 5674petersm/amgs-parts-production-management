@@ -3,6 +3,7 @@ import sql from "mssql";
 import { getPool } from "@/lib/db";
 import { bindDateTime2, bindInt, bindNVarChar } from "@/lib/sql-request";
 import { plantLocalTimestampForSql } from "@/lib/time";
+import { parseCustomPartProcesses, serializeCustomPartProcesses, type CustomPartProcess } from "@/constants/custom-part-processes";
 
 export type PartLibraryRecord = {
   libraryPartId: number;
@@ -15,6 +16,7 @@ export type PartLibraryRecord = {
   folderUrl: string;
   createdBy: string;
   createdAt: string;
+  requiredProcesses: CustomPartProcess[];
 };
 
 export type PartLibraryInput = {
@@ -26,6 +28,7 @@ export type PartLibraryInput = {
   driveFolderId: string;
   folderUrl: string;
   createdBy: string;
+  requiredProcesses: CustomPartProcess[];
 };
 
 export async function partLibraryAvailable(): Promise<boolean> {
@@ -44,9 +47,18 @@ export async function partLibraryCanUpdate(): Promise<boolean> {
   return Boolean(result.recordset[0]?.CanUpdate);
 }
 
+export async function partLibraryProcessesAvailable(): Promise<boolean> {
+  const pool = await getPool();
+  const result = await pool.request().query<{ Available: number }>(`
+    SELECT CASE WHEN COL_LENGTH(N'dbo.tblcustompartlibrary', N'RequiredProcesses') IS NOT NULL THEN 1 ELSE 0 END AS Available
+  `);
+  return Boolean(result.recordset[0]?.Available);
+}
+
 export async function listPartLibrary(): Promise<PartLibraryRecord[]> {
   if (!(await partLibraryAvailable())) return [];
   const pool = await getPool();
+  const processesAvailable = await partLibraryProcessesAvailable();
   const result = await pool.request().query<{
     LibraryPartID: number;
     PartName: string;
@@ -58,9 +70,11 @@ export async function listPartLibrary(): Promise<PartLibraryRecord[]> {
     GoogleDriveFolderUrl: string;
     CreatedBy: string;
     CreatedAt: Date;
+    RequiredProcesses: string | null;
   }>(`
     SELECT LibraryPartID, PartName, Description, Material, HasCustomColor,
-      CustomColor, GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt
+      CustomColor, GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt,
+      ${processesAvailable ? "RequiredProcesses" : "NULL AS RequiredProcesses"}
     FROM dbo.tblcustompartlibrary
     ORDER BY PartName ASC, CreatedAt DESC
   `);
@@ -75,21 +89,24 @@ export async function listPartLibrary(): Promise<PartLibraryRecord[]> {
     folderUrl: row.GoogleDriveFolderUrl.trim(),
     createdBy: row.CreatedBy.trim(),
     createdAt: row.CreatedAt.toISOString(),
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
   }));
 }
 
 export async function getPartLibraryItem(libraryPartId: number): Promise<PartLibraryRecord | null> {
   if (!(await partLibraryAvailable())) return null;
   const pool = await getPool();
+  const processesAvailable = await partLibraryProcessesAvailable();
   const request = pool.request();
   bindInt(request, "libraryPartId", libraryPartId);
   const result = await request.query<{
     LibraryPartID: number; PartName: string; Description: string; Material: string;
     HasCustomColor: boolean; CustomColor: string | null; GoogleDrivePartFolderId: string;
-    GoogleDriveFolderUrl: string; CreatedBy: string; CreatedAt: Date;
+    GoogleDriveFolderUrl: string; CreatedBy: string; CreatedAt: Date; RequiredProcesses: string | null;
   }>(`
     SELECT LibraryPartID, PartName, Description, Material, HasCustomColor,
-      CustomColor, GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt
+      CustomColor, GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt,
+      ${processesAvailable ? "RequiredProcesses" : "NULL AS RequiredProcesses"}
     FROM dbo.tblcustompartlibrary WHERE LibraryPartID = @libraryPartId
   `);
   const row = result.recordset[0];
@@ -99,6 +116,7 @@ export async function getPartLibraryItem(libraryPartId: number): Promise<PartLib
     hasCustomColor: Boolean(row.HasCustomColor), color: row.CustomColor?.trim() || "No Color",
     driveFolderId: row.GoogleDrivePartFolderId.trim(), folderUrl: row.GoogleDriveFolderUrl.trim(),
     createdBy: row.CreatedBy.trim(), createdAt: row.CreatedAt.toISOString(),
+    requiredProcesses: parseCustomPartProcesses(row.RequiredProcesses),
   } : null;
 }
 
@@ -115,13 +133,16 @@ export async function createPartLibraryItem(input: PartLibraryInput): Promise<nu
   bindNVarChar(request, "folderUrl", input.folderUrl, 500);
   bindNVarChar(request, "createdBy", input.createdBy, 256);
   bindDateTime2(request, "createdAt", plantLocalTimestampForSql());
+  const processesAvailable = await partLibraryProcessesAvailable();
+  if (input.requiredProcesses.length && !processesAvailable) throw new Error("Library part processes are awaiting their database migration.");
+  if (processesAvailable) bindNVarChar(request, "requiredProcesses", serializeCustomPartProcesses(input.requiredProcesses), 100);
   const result = await request.query<{ LibraryPartID: number }>(`
     INSERT INTO dbo.tblcustompartlibrary
       (PartName, Description, Material, HasCustomColor, CustomColor,
-       GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt)
+       GoogleDrivePartFolderId, GoogleDriveFolderUrl, CreatedBy, CreatedAt${processesAvailable ? ", RequiredProcesses" : ""})
     OUTPUT INSERTED.LibraryPartID
     VALUES (@partName, @description, @material, @hasCustomColor, NULLIF(@color, N''),
-      @folderId, @folderUrl, @createdBy, @createdAt)
+      @folderId, @folderUrl, @createdBy, @createdAt${processesAvailable ? ", NULLIF(@requiredProcesses, N'')" : ""})
   `);
   return Number(result.recordset[0].LibraryPartID);
 }
@@ -133,6 +154,7 @@ export async function updatePartLibraryItem(input: {
   material: string;
   hasCustomColor: boolean;
   color: string;
+  requiredProcesses: CustomPartProcess[];
 }): Promise<boolean> {
   const pool = await getPool();
   const request = pool.request();
@@ -142,9 +164,13 @@ export async function updatePartLibraryItem(input: {
   bindNVarChar(request, "material", input.material, 50);
   request.input("hasCustomColor", input.hasCustomColor ? 1 : 0);
   bindNVarChar(request, "color", input.color, 100);
+  const processesAvailable = await partLibraryProcessesAvailable();
+  if (input.requiredProcesses.length && !processesAvailable) throw new Error("Library part processes are awaiting their database migration.");
+  if (processesAvailable) bindNVarChar(request, "requiredProcesses", serializeCustomPartProcesses(input.requiredProcesses), 100);
   const result = await request.query(`UPDATE dbo.tblcustompartlibrary
     SET PartName=@partName, Description=@description, Material=@material,
       HasCustomColor=@hasCustomColor, CustomColor=NULLIF(@color, N'')
+      ${processesAvailable ? ", RequiredProcesses=NULLIF(@requiredProcesses, N'')" : ""}
     WHERE LibraryPartID=@libraryPartId`);
   return Boolean(result.rowsAffected[0]);
 }
@@ -157,6 +183,8 @@ export type PartLibraryGroupRecord = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  driveFolderId: string;
+  folderUrl: string;
 };
 
 export async function partLibraryGroupsAvailable(): Promise<boolean> {
@@ -169,14 +197,27 @@ export async function partLibraryGroupsAvailable(): Promise<boolean> {
   return Boolean(result.recordset[0]?.Available);
 }
 
+export async function partLibraryGroupFilesAvailable(): Promise<boolean> {
+  const pool = await getPool();
+  const result = await pool.request().query<{ Available: number }>(`
+    SELECT CASE WHEN COL_LENGTH(N'dbo.tblcustompartlibrarygroups', N'GoogleDriveFolderId') IS NOT NULL
+      AND COL_LENGTH(N'dbo.tblcustompartlibrarygroups', N'GoogleDriveFolderUrl') IS NOT NULL
+      THEN 1 ELSE 0 END AS Available
+  `);
+  return Boolean(result.recordset[0]?.Available);
+}
+
 export async function listPartLibraryGroups(): Promise<PartLibraryGroupRecord[]> {
   if (!(await partLibraryGroupsAvailable())) return [];
   const pool = await getPool();
+  const filesAvailable = await partLibraryGroupFilesAvailable();
   const [groupsResult, membersResult] = await Promise.all([
     pool.request().query<{
       LibraryGroupID: number; GroupName: string; Description: string | null;
       CreatedBy: string; CreatedAt: Date; UpdatedAt: Date;
+      GoogleDriveFolderId: string | null; GoogleDriveFolderUrl: string | null;
     }>(`SELECT LibraryGroupID, GroupName, Description, CreatedBy, CreatedAt, UpdatedAt
+       ${filesAvailable ? ", GoogleDriveFolderId, GoogleDriveFolderUrl" : ", NULL AS GoogleDriveFolderId, NULL AS GoogleDriveFolderUrl"}
        FROM dbo.tblcustompartlibrarygroups ORDER BY GroupName`),
     pool.request().query<{
       LibraryGroupID: number; LibraryPartID: number; QtyPerSet: number; SortOrder: number;
@@ -192,7 +233,24 @@ export async function listPartLibraryGroups(): Promise<PartLibraryGroupRecord[]>
     libraryGroupId: Number(row.LibraryGroupID), groupName: row.GroupName.trim(),
     description: row.Description?.trim() || "", members: membersByGroup.get(Number(row.LibraryGroupID)) || [],
     createdBy: row.CreatedBy.trim(), createdAt: row.CreatedAt.toISOString(), updatedAt: row.UpdatedAt.toISOString(),
+    driveFolderId: row.GoogleDriveFolderId?.trim() || "",
+    folderUrl: row.GoogleDriveFolderUrl?.trim() || "",
   }));
+}
+
+export async function setPartLibraryGroupDriveFolder(input: {
+  libraryGroupId: number; driveFolderId: string; folderUrl: string;
+}): Promise<void> {
+  if (!(await partLibraryGroupFilesAvailable())) throw new Error("Group drawings are awaiting their database migration.");
+  const pool = await getPool();
+  const request = pool.request();
+  bindInt(request, "libraryGroupId", input.libraryGroupId);
+  bindNVarChar(request, "driveFolderId", input.driveFolderId, 100);
+  bindNVarChar(request, "folderUrl", input.folderUrl, 500);
+  const result = await request.query(`UPDATE dbo.tblcustompartlibrarygroups
+    SET GoogleDriveFolderId=@driveFolderId, GoogleDriveFolderUrl=@folderUrl
+    WHERE LibraryGroupID=@libraryGroupId`);
+  if (!result.rowsAffected[0]) throw new Error("Library group not found.");
 }
 
 export async function getPartLibraryGroup(libraryGroupId: number): Promise<PartLibraryGroupRecord | null> {

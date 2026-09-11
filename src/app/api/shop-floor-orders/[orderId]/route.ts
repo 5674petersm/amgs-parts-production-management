@@ -7,6 +7,7 @@ import {
   getShopFloorOrderDetail,
   getCustomPartLineMappings,
   setShopFloorLineComplete,
+  setShopFloorLineProcess,
 } from "@/lib/shop-floor-orders";
 
 type RouteContext = { params: Promise<{ orderId: string }> };
@@ -53,7 +54,7 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
   const { orderId } = await context.params;
   try {
-    const body = (await request.json()) as { lineId?: string; checked?: boolean };
+    const body = (await request.json()) as { lineId?: string; checked?: boolean; process?: "weld" | "mesh" };
     const lineId = String(body.lineId ?? "").trim();
     if (!lineId || typeof body.checked !== "boolean") {
       return NextResponse.json({ error: "Line and completion state are required." }, { status: 400 });
@@ -61,6 +62,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     const session = await auth();
     const role = session?.user?.role;
     const canCorrectCompletion = Boolean(role && hasPermission(role, "editParts"));
+    if (body.process) {
+      if (!(["weld", "mesh"] as const).includes(body.process)) {
+        return NextResponse.json({ error: "Invalid line process." }, { status: 400 });
+      }
+      await setShopFloorLineProcess({ orderId, lineId, process: body.process, checked: body.checked });
+      return NextResponse.json({ ok: true });
+    }
     if (!body.checked && !canCorrectCompletion) {
       return NextResponse.json(
         { error: "Engineering clearance is required to undo completion." },

@@ -46,6 +46,7 @@ export async function POST(request: Request) {
         submittedBy: authResult.email,
         sourceLibraryGroupId: libraryGroupId, libraryGroupAssignmentId,
         libraryGroupSetQuantity: setQuantity,
+        groupDrawingFolderId: group.driveFolderId,
       }));
     }
     return NextResponse.json({ ok: true, groupName: group.groupName,

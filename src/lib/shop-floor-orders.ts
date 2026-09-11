@@ -1,6 +1,7 @@
 import type {
   ShopFloorOrder,
   ShopFloorOrderDetail,
+  ShopFloorOrderDrawing,
   ShopFloorPanelDocument,
   ShopFloorOrdersResult,
 } from "@/types/shop-floor-order";
@@ -40,9 +41,10 @@ type DashboardOrderDetailResponse = {
     notes?: string;
   }>;
   progress?: Record<string, {
-    steps?: { completed?: { checked?: boolean; date?: string } };
+    steps?: Record<string, { checked?: boolean; date?: string }>;
   }>;
   panelDocuments?: ShopFloorPanelDocument[];
+  orderDrawings?: ShopFloorOrderDrawing[];
   error?: string;
 };
 
@@ -114,6 +116,7 @@ export async function getShopFloorOrderDetail(
     lines: (data.lines ?? []).map((line) => {
       const rowId = String(line.rowId ?? "");
       const completed = data.progress?.[rowId]?.steps?.completed;
+      const steps = Object.fromEntries(Object.entries(data.progress?.[rowId]?.steps || {}).map(([key, value]) => [key, { checked: Boolean(value.checked), date: value.date || "" }]));
       return {
         rowId,
         lineNumber: line.lineNumber ?? null,
@@ -123,12 +126,20 @@ export async function getShopFloorOrderDetail(
         notes: line.notes?.trim() || "",
         completed: Boolean(completed?.checked),
         completedDate: completed?.date || "",
+        steps,
       };
     }).filter((line) => line.rowId),
     panelDocuments: (data.panelDocuments ?? []).map((document) => ({
       ...document,
       orderNumber: String(document.orderNumber ?? ""),
       orderLineId: String(document.orderLineId ?? ""),
+    })),
+    orderDrawings: (data.orderDrawings ?? []).map((drawing) => ({
+      ...drawing,
+      id: Number(drawing.id),
+      orderNumber: String(drawing.orderNumber ?? orderId),
+      shareWithCustomer: Boolean(drawing.shareWithCustomer),
+      size: Number(drawing.size ?? 0),
     })),
   };
 }
@@ -156,6 +167,61 @@ export async function getUploadedPanelDocument(orderId: string, lineId: string, 
   return { bytes: await response.arrayBuffer(), contentDisposition: response.headers.get("content-disposition") || "" };
 }
 
+export async function createShopFloorOrderDrawing(input: {
+  orderId: string;
+  fileName: string;
+  contentBase64: string;
+  shareWithCustomer: boolean;
+  uploadedBy: string;
+}): Promise<ShopFloorOrderDrawing> {
+  const response = await fetch(`${dashboardApiUrl()}/api/order-drawings/${encodeURIComponent(input.orderId)}`, {
+    method: "POST",
+    headers: { ...shopFloorHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: { name: input.fileName, contentBase64: input.contentBase64 },
+      shareWithCustomer: input.shareWithCustomer,
+      uploadedBy: input.uploadedBy,
+    }),
+    cache: "no-store",
+  });
+  const data = await response.json() as { drawing?: ShopFloorOrderDrawing; error?: string };
+  if (!response.ok || !data.drawing) throw new Error(data.error || "Unable to add the order drawing.");
+  return data.drawing;
+}
+
+export async function setShopFloorOrderDrawingSharing(input: {
+  orderId: string; drawingId: number; shareWithCustomer: boolean;
+}): Promise<void> {
+  const response = await fetch(`${dashboardApiUrl()}/api/order-drawings/${encodeURIComponent(input.orderId)}/${input.drawingId}`, {
+    method: "PATCH", headers: { ...shopFloorHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ shareWithCustomer: input.shareWithCustomer }), cache: "no-store",
+  });
+  const data = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(data.error || "Unable to update customer sharing.");
+}
+
+export async function deleteShopFloorOrderDrawing(orderId: string, drawingId: number): Promise<void> {
+  const response = await fetch(`${dashboardApiUrl()}/api/order-drawings/${encodeURIComponent(orderId)}/${drawingId}`, {
+    method: "DELETE", headers: shopFloorHeaders(), cache: "no-store",
+  });
+  const data = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(data.error || "Unable to delete the order drawing.");
+}
+
+export async function getShopFloorOrderDrawingFile(orderId: string, drawingId: number): Promise<{
+  bytes: ArrayBuffer; contentType: string; contentDisposition: string;
+}> {
+  const response = await fetch(`${dashboardApiUrl()}/api/order-drawings/${encodeURIComponent(orderId)}/${drawingId}/file`, {
+    headers: shopFloorHeaders(), cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Order drawing was not found.");
+  return {
+    bytes: await response.arrayBuffer(),
+    contentType: response.headers.get("content-type") || "application/octet-stream",
+    contentDisposition: response.headers.get("content-disposition") || "attachment",
+  };
+}
+
 export async function setShopFloorLineComplete(input: {
   orderId: string;
   lineId: string;
@@ -178,6 +244,20 @@ export async function setShopFloorLineComplete(input: {
   if (!response.ok) {
     throw new Error(data.error || "Unable to update this line.");
   }
+}
+
+export async function setShopFloorLineProcess(input: {
+  orderId: string; lineId: string; process: "weld" | "mesh"; checked: boolean;
+}): Promise<void> {
+  const response = await fetch(
+    `${dashboardApiUrl()}/api/shop-floor-orders/${encodeURIComponent(input.orderId)}/lines/${encodeURIComponent(input.lineId)}/process`,
+    {
+      method: "PATCH", headers: { ...shopFloorHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ process: input.process, checked: input.checked }), cache: "no-store",
+    },
+  );
+  const data = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(data.error || "Unable to update this line process.");
 }
 
 export async function getCustomPartLineMappings(orderId = ""): Promise<CustomPartLineMapping[]> {

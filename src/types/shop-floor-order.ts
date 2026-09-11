@@ -24,6 +24,7 @@ export type ShopFloorOrderLine = {
   notes: string;
   completed: boolean;
   completedDate: string;
+  steps: Record<string, { checked: boolean; date: string }>;
 };
 
 export type ShopFloorOrderFileGroup = {
@@ -34,6 +35,8 @@ export type ShopFloorOrderFileGroup = {
   folderUrl: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
   mappedOrderLineIds: string[];
+  requiredProcesses: import("@/constants/custom-part-processes").CustomPartProcess[];
+  processProgress: Partial<Record<import("@/constants/custom-part-processes").CustomPartProcess, string>>;
 };
 
 export type ShopFloorPanelDocument = {
@@ -53,11 +56,25 @@ export type ShopFloorPanelDocument = {
   notes?: string;
   drawingSvg?: string;
   cutlistJson?: string;
+  cutlistQuantity?: number | null;
+};
+
+export type ShopFloorOrderDrawing = {
+  id: number;
+  orderNumber: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  shareWithCustomer: boolean;
+  uploadedBy: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ShopFloorOrderDetail = {
   lines: ShopFloorOrderLine[];
   files: ShopFloorOrderFileGroup[];
   panelDocuments: ShopFloorPanelDocument[];
+  orderDrawings: ShopFloorOrderDrawing[];
   filesError?: string;
 };

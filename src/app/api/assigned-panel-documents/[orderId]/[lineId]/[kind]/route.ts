@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createApprovedPanelCutlistPdf, createApprovedPanelDrawingPdf } from "@/lib/panel-documents";
+import { approvedCutlistRows } from "@/lib/panel-cutlist";
 import { getPanelDocumentAssignments, getUploadedPanelDocument } from "@/lib/shop-floor-orders";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function GET(request: Request, context: RouteContext) {
       bytes = await createApprovedPanelDrawingPdf(document.drawingSvg);
       fileName = `${document.partNumber}-approved-drawing.pdf`;
     } else {
-      bytes = await createApprovedPanelCutlistPdf(JSON.parse(document.cutlistJson || "[]"), { customer: document.customer, order: document.orderNumber });
+      bytes = await createApprovedPanelCutlistPdf(approvedCutlistRows(document), { customer: document.customer, order: document.orderNumber });
       fileName = `${document.partNumber}-approved-cutlist.pdf`;
     }
     const download = new URL(request.url).searchParams.get("download") === "1";

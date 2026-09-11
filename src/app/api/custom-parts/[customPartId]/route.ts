@@ -23,6 +23,7 @@ import {
   setCustomPartLineMappings,
   validateCustomPartLineMappings,
 } from "@/lib/shop-floor-orders";
+import { normalizeCustomPartProcesses } from "@/constants/custom-part-processes";
 
 type RouteContext = { params: Promise<{ customPartId: string }> };
 
@@ -49,6 +50,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .map((value) => String(value).trim())
     .filter(Boolean))];
   const qtyNeeded = Number(formData.get("qtyNeeded"));
+  const requiredProcesses = normalizeCustomPartProcesses(formData.getAll("requiredProcesses"));
   const files = formData.getAll("drawings").filter(
     (entry): entry is File => entry instanceof File && entry.size > 0,
   );
@@ -83,6 +85,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       material,
       hasCustomColor,
       customColor: hasCustomColor ? customColor : standardColor,
+      requiredProcesses,
     });
     await setCustomPartLineMappings({
       customPartId,

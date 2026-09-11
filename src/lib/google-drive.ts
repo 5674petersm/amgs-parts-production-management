@@ -4,6 +4,7 @@ import { google } from "googleapis";
 
 import { loadServiceAccountCredentials } from "@/lib/google-service-account";
 import { listCustomPartDriveFoldersByOrder } from "@/lib/custom-parts";
+import type { CustomPartProcess } from "@/constants/custom-part-processes";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 
@@ -35,6 +36,8 @@ export type CustomPartDriveFileGroup = {
   folderUrl: string;
   files: { id: string; name: string; mimeType: string; url: string }[];
   mappedOrderLineIds: string[];
+  requiredProcesses: CustomPartProcess[];
+  processProgress: Partial<Record<CustomPartProcess, string>>;
 };
 
 export type DirectDriveFile = {
@@ -340,6 +343,59 @@ export async function uploadPartLibraryFiles(input: PartLibraryDriveInput & {
   return { partFolderId, folderUrl: `https://drive.google.com/drive/folders/${partFolderId}` };
 }
 
+export async function uploadPartLibraryGroupPdfs(input: {
+  libraryGroupId: number;
+  groupName: string;
+  folderId: string;
+  files: CustomPartUploadInput["files"];
+}): Promise<{ folderId: string; folderUrl: string }> {
+  const parentFolderId = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID?.trim();
+  if (!parentFolderId) throw new Error("Google Drive parent folder is not configured.");
+  const drive = getDriveClient();
+  await assertParentFolderAccessible(drive, parentFolderId);
+  let folderId = input.folderId;
+  if (!folderId) {
+    const libraryFolderId = await findOrCreateFolder(drive, parentFolderId, "Parts Library");
+    const groupsFolderId = await findOrCreateFolder(drive, libraryFolderId, "Part Groups");
+    folderId = await findOrCreateFolder(drive, groupsFolderId, `Group ${input.libraryGroupId} - ${input.groupName}`);
+  }
+  for (const file of input.files) {
+    await uploadBuffer(drive, folderId, file.name, "application/pdf", file.buffer);
+  }
+  return { folderId, folderUrl: `https://drive.google.com/drive/folders/${folderId}` };
+}
+
+export async function trashPartLibraryGroupFile(folderId: string, fileId: string): Promise<void> {
+  const drive = getDriveClient();
+  const result = await drive.files.list({
+    q: `'${escapeDriveQueryValue(folderId)}' in parents and trashed=false`,
+    fields: "files(id)", supportsAllDrives: true, includeItemsFromAllDrives: true,
+  });
+  if (!(result.data.files ?? []).some((file) => file.id === fileId)) {
+    throw new Error("The selected PDF does not belong to this group.");
+  }
+  await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true });
+}
+
+export async function copyPartLibraryGroupPdfsToFolder(sourceFolderId: string, targetFolderId: string): Promise<number> {
+  if (!sourceFolderId) return 0;
+  const drive = getDriveClient();
+  const result = await drive.files.list({
+    q: `'${escapeDriveQueryValue(sourceFolderId)}' in parents and trashed=false`,
+    fields: "files(id,name,mimeType)", supportsAllDrives: true, includeItemsFromAllDrives: true,
+  });
+  const pdfs = (result.data.files ?? []).filter((file) => file.id && file.name
+    && (file.mimeType === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")));
+  for (const file of pdfs) {
+    await drive.files.copy({
+      fileId: file.id!,
+      requestBody: { name: sanitizeDriveName(file.name!), parents: [targetFolderId] },
+      supportsAllDrives: true,
+    });
+  }
+  return pdfs.length;
+}
+
 export async function updatePartLibraryFiles(input: PartLibraryDriveInput & {
   folderId: string;
   files: CustomPartUploadInput["files"];
@@ -508,6 +564,8 @@ export async function listCustomPartFilesForOrder(
       folderUrl: folder.folderUrl || `https://drive.google.com/drive/folders/${folder.folderId}`,
       files,
       mappedOrderLineIds: folder.mappedOrderLineIds,
+      requiredProcesses: folder.requiredProcesses,
+      processProgress: folder.processProgress,
     };
   }));
 }

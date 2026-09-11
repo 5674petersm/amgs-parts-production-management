@@ -1,4 +1,5 @@
 import type { ProductionSource } from "@/types";
+import type { CustomPartProcess } from "@/constants/custom-part-processes";
 
 export type CustomPartListItem = {
   customPartId: number;
@@ -38,6 +39,7 @@ export type CustomPartDraft = {
   saveToLibrary: boolean;
   sourceLibraryPartId: number | null;
   sourceLibraryPartName: string;
+  requiredProcesses: CustomPartProcess[];
 };
 
 export type CustomPartOrderLookup = {
@@ -75,6 +77,8 @@ export type CurrentCustomPart = {
   cut: boolean;
   completedAt: string | null;
   groupId: string | null;
+  requiredProcesses: CustomPartProcess[];
+  processProgress: Partial<Record<CustomPartProcess, string>>;
 };
 
 export type CustomPartOrderLineChoice = {
@@ -108,6 +112,7 @@ export type PartLibraryItem = {
   files: { id: string; name: string; mimeType: string; url: string }[];
   createdBy: string;
   createdAt: string;
+  requiredProcesses: CustomPartProcess[];
 };
 
 export type PartLibraryGroupMember = {
@@ -124,4 +129,6 @@ export type PartLibraryGroup = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  folderUrl: string;
+  files: { id: string; name: string; mimeType: string; url: string }[];
 };
